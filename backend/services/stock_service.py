@@ -20,27 +20,28 @@ class StockService:
         results = []
 
         # 1. DB catalogue (prefix match on ticker or company name)
-        with DBCursor() as cur:
-            cur.execute(
-                """SELECT ticker, company_name, sector, exchange
-                     FROM stocks
-                    WHERE UPPER(ticker)       LIKE UPPER(:1) || '%'
-                       OR UPPER(company_name) LIKE '%' || UPPER(:2) || '%'
-                    ORDER BY ticker
-                    FETCH FIRST 10 ROWS ONLY""",
-                [query, query]
-            )
-            rows = cur.fetchall()
+        try:
+            with DBCursor() as cur:
+                cur.execute(
+                    """SELECT ticker, company_name, sector, exchange
+                         FROM stocks
+                        WHERE UPPER(ticker)       LIKE UPPER(:1) || '%'
+                           OR UPPER(company_name) LIKE '%' || UPPER(:2) || '%'
+                        ORDER BY ticker
+                        FETCH FIRST 10 ROWS ONLY""",
+                    [query, query]
+                )
+                rows = cur.fetchall()
 
-        seen = set()
-        for ticker, name, sector, exchange in rows:
-            seen.add(ticker)
-            results.append({
-                "ticker":       ticker,
-                "company_name": name,
-                "sector":       sector or "",
-                "exchange":     exchange or "",
-            })
+            for ticker, name, sector, exchange in rows:
+                results.append({
+                    "ticker":       ticker,
+                    "company_name": name,
+                    "sector":       sector or "",
+                    "exchange":     exchange or "",
+                })
+        except Exception:
+            pass
 
         # 2. Enrich with live price (batch fetch for up to 10 tickers)
         if results:
@@ -48,15 +49,17 @@ class StockService:
             try:
                 data = yf.download(
                     tickers_str, period="2d", interval="1d",
-                    group_by="ticker", auto_adjust=True, progress=False
+                    auto_adjust=True, progress=False
                 )
                 for r in results:
                     t = r["ticker"]
                     try:
-                        if len(results) == 1:
-                            closes = data["Close"].dropna()
+                        if isinstance(data.columns, pd.MultiIndex):
+                            # yfinance >= 0.2.40: MultiIndex is (price, ticker)
+                            closes = data["Close"][t].dropna()
                         else:
-                            closes = data[t]["Close"].dropna()
+                            # Single ticker — flat columns
+                            closes = data["Close"].dropna()
                         if len(closes) >= 2:
                             r["price"]      = round(float(closes.iloc[-1]), 4)
                             r["change_pct"] = round(

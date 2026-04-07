@@ -149,21 +149,24 @@ class PortfolioService:
             return {}
         prices = {}
         try:
+            import pandas as pd
             data = yf.download(
                 " ".join(tickers), period="2d", interval="1d",
-                group_by="ticker", auto_adjust=True, progress=False
+                auto_adjust=True, progress=False
             )
-            import pandas as pd
+            if data.empty:
+                return prices
             if isinstance(data.columns, pd.MultiIndex):
+                # yfinance >= 0.2.40: MultiIndex is (price, ticker)
                 for t in tickers:
                     try:
-                        closes = data[t]["Close"].dropna()
+                        closes = data["Close"][t].dropna()
                         if not closes.empty:
                             prices[t] = round(float(closes.iloc[-1]), 4)
                     except Exception:
                         pass
             else:
-                # Single ticker
+                # Single ticker — flat columns
                 closes = data["Close"].dropna()
                 if not closes.empty and len(tickers) == 1:
                     prices[tickers[0]] = round(float(closes.iloc[-1]), 4)

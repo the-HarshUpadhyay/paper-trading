@@ -23,13 +23,14 @@ A production-quality paper trading platform built with **Oracle 19c/XE**, **Pyth
 
 | Layer      | Technology                               |
 |------------|------------------------------------------|
-| Database   | Oracle 19c / XE (SQL + PL/SQL)           |
-| Backend    | Python 3.11+, Flask, python-oracledb     |
+| Database   | Oracle 21c XE (SQL + PL/SQL)             |
+| Backend    | Python 3.12, Flask, oracledb             |
 | Auth       | JWT (flask-jwt-extended), bcrypt         |
 | Market Data| yfinance (Yahoo Finance)                 |
 | Frontend   | React 18, React Router v6, Vite          |
 | Charts     | Recharts                                 |
 | Icons      | Lucide React                             |
+| Dev Infra  | Docker, Docker Compose                   |
 
 ---
 
@@ -37,13 +38,16 @@ A production-quality paper trading platform built with **Oracle 19c/XE**, **Pyth
 
 ```
 paper-trading/
+├── docker-compose.yml         Single command to start DB + backend + frontend
 ├── database/
+│   ├── setup.sql              Master script — runs all four files in order
 │   ├── 01_schema.sql          Tables, indexes, constraints (3NF)
 │   ├── 02_triggers.sql        Business-rule enforcement triggers
 │   ├── 03_procedures.sql      PL/SQL packages, functions, views
 │   └── 04_sample_data.sql     25 stock seeds + demo user
 │
 ├── backend/
+│   ├── Dockerfile
 │   ├── app.py                 Flask application factory
 │   ├── config.py              Configuration (env vars)
 │   ├── requirements.txt
@@ -64,6 +68,7 @@ paper-trading/
 │       └── watchlist_service.py
 │
 └── frontend/
+    ├── Dockerfile
     ├── index.html
     ├── package.json
     ├── vite.config.js
@@ -130,62 +135,89 @@ PORTFOLIO_SNAPSHOTS — Periodic portfolio valuations for growth chart
 
 ## Setup & Installation
 
-### Prerequisites
+### Option A — Docker Compose (recommended)
 
-- Oracle Database 19c or Oracle XE (with SQL Developer)
-- Python 3.11+
-- Node.js 18+
+The easiest way to run the whole stack. Docker starts Oracle XE, the Flask backend, and the Vite frontend with a single command — no local Oracle install needed.
+
+**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+
+```bash
+# First run — builds images and initialises the database (~2–3 min)
+docker compose up --build
+
+# Subsequent runs
+docker compose up
+```
+
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:3000 |
+| Backend API | http://localhost:5000 |
+| Oracle | localhost:1521 (XEPDB1) |
+
+The SQL init scripts (`01_schema.sql` → `04_sample_data.sql`) run automatically on first boot. Database state persists in a named Docker volume (`oracle_data`) between restarts.
+
+**Useful commands:**
+
+```bash
+# Stop all services
+docker compose down
+
+# Stop and wipe the database volume (full reset)
+docker compose down -v
+
+# View logs for one service
+docker compose logs -f backend
+```
+
+> **Note:** The backend waits for the Oracle healthcheck to pass before starting, so the first `docker compose up` will appear to hang for ~2 minutes while Oracle initialises — this is normal.
 
 ---
 
-### 1. Database Setup
+### Option B — Manual Setup
 
-Open **Oracle SQL Developer** and run the scripts in order:
+Use this if you already have Oracle running locally and prefer to manage each process yourself.
+
+**Prerequisites:**
+- Oracle Database 19c or XE (with SQL Developer / SQL*Plus)
+- Python 3.12 (3.11+ supported; 3.14 is not — `oracledb` wheels not yet available)
+- Node.js 18+
+
+#### 1. Database
+
+Run the master setup script from the project root using SQL*Plus or SQLcl:
+
+```bash
+sqlplus your_user/your_pass@localhost:1521/XEPDB1 @database/setup.sql
+```
+
+Or open each script in SQL Developer and run them in order:
 
 ```sql
--- 1. Create tables, indexes, constraints
-@database/01_schema.sql
-
--- 2. Create triggers
-@database/02_triggers.sql
-
--- 3. Create packages, procedures, views
-@database/03_procedures.sql
-
--- 4. Insert seed data (25 stocks + demo user)
-@database/04_sample_data.sql
+@database/01_schema.sql       -- Tables, indexes, constraints
+@database/02_triggers.sql     -- Business-rule triggers
+@database/03_procedures.sql   -- Packages, procedures, views
+@database/04_sample_data.sql  -- 25 stock seeds + demo user
 ```
 
 > **Note:** The demo user `demo_trader` in `04_sample_data.sql` has a placeholder password hash. Register a real account through the UI instead.
 
----
-
-### 2. Backend Setup
+#### 2. Backend
 
 ```bash
 cd backend
-
-# Copy and fill in environment variables
-cp .env.example .env
+cp .env.example .env   # then edit .env with your Oracle credentials
 ```
-
-Edit `.env`:
 
 ```env
 FLASK_DEBUG=1
 SECRET_KEY=your-long-random-secret-key
-
-# Oracle connection
 ORACLE_USER=your_oracle_username
 ORACLE_PASSWORD=your_oracle_password
 ORACLE_DSN=localhost:1521/XEPDB1
-
-# JWT
 JWT_SECRET_KEY=another-long-random-secret
 JWT_ACCESS_TOKEN_EXPIRES=86400
 ```
-
-Install dependencies and run:
 
 ```bash
 pip install -r requirements.txt
@@ -193,11 +225,9 @@ python app.py
 # API running at http://localhost:5000
 ```
 
-> If using Oracle Instant Client (thick mode), uncomment and set `lib_dir` in [db/connection.py](backend/db/connection.py#L13).
+> **Oracle Instant Client (thick mode):** uncomment and set `lib_dir` in [db/connection.py](backend/db/connection.py#L13).
 
----
-
-### 3. Frontend Setup
+#### 3. Frontend
 
 ```bash
 cd frontend
@@ -279,15 +309,17 @@ Authorization: Bearer <jwt_token>
 
 ## Configuration Reference
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ORACLE_USER` | `system` | Oracle DB username |
-| `ORACLE_PASSWORD` | `oracle` | Oracle DB password |
-| `ORACLE_DSN` | `localhost:1521/XEPDB1` | Oracle connection string |
-| `SECRET_KEY` | — | Flask secret (change in production) |
-| `JWT_SECRET_KEY` | — | JWT signing secret (change in production) |
-| `JWT_ACCESS_TOKEN_EXPIRES` | `86400` | Token lifetime in seconds (24 hours) |
-| `FLASK_DEBUG` | `0` | Enable Flask debug mode |
+| Variable | Default (manual) | Docker default | Description |
+|----------|-----------------|----------------|-------------|
+| `ORACLE_USER` | `system` | `trader` | Oracle DB username |
+| `ORACLE_PASSWORD` | `oracle` | `trader` | Oracle DB password |
+| `ORACLE_DSN` | `localhost:1521/XEPDB1` | `db:1521/XEPDB1` | Oracle connection string |
+| `SECRET_KEY` | — | — | Flask secret (change in production) |
+| `JWT_SECRET_KEY` | — | — | JWT signing secret (change in production) |
+| `JWT_ACCESS_TOKEN_EXPIRES` | `86400` | `86400` | Token lifetime in seconds (24 hours) |
+| `FLASK_DEBUG` | `0` | `1` | Enable Flask debug mode |
+
+When using Docker Compose, `ORACLE_DSN` is automatically overridden to `db:1521/XEPDB1` (using the `db` service name) regardless of what is set in `backend/.env`.
 
 ---
 
@@ -295,7 +327,7 @@ Authorization: Bearer <jwt_token>
 
 - [ ] Set strong `SECRET_KEY` and `JWT_SECRET_KEY` in `.env`
 - [ ] Switch Oracle pool credentials to a dedicated app user (not `system`)
-- [ ] Run backend with `gunicorn` instead of `python app.py`
+- [ ] Run backend with `gunicorn` instead of `python app.py` (Linux/macOS only — use `waitress` on Windows)
 - [ ] Build frontend with `npm run build` and serve from a static host or Nginx
 - [ ] Enable HTTPS — update `CORS_ORIGINS` in `config.py` accordingly
 - [ ] Consider rate-limiting the `/api/stocks/*` endpoints (Yahoo Finance has informal limits)
