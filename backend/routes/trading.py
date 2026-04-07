@@ -13,7 +13,7 @@ _svc = TradingService()
 @trading_bp.route("/buy", methods=["POST"])
 @jwt_required()
 def buy():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     data = request.get_json(silent=True) or {}
 
     ticker   = (data.get("ticker") or "").strip().upper()
@@ -37,7 +37,7 @@ def buy():
 @trading_bp.route("/sell", methods=["POST"])
 @jwt_required()
 def sell():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     data = request.get_json(silent=True) or {}
 
     ticker   = (data.get("ticker") or "").strip().upper()
@@ -61,7 +61,7 @@ def sell():
 @trading_bp.route("/orders", methods=["GET"])
 @jwt_required()
 def orders():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     page    = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 20))
     result, status = _svc.get_orders(user_id, page, per_page)

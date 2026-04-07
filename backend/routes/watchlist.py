@@ -13,7 +13,7 @@ _svc = WatchlistService()
 @watchlist_bp.route("/watchlist", methods=["GET"])
 @jwt_required()
 def get_watchlist():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     result, status = _svc.get_watchlist(user_id)
     return jsonify(result), status
 
@@ -21,7 +21,7 @@ def get_watchlist():
 @watchlist_bp.route("/watchlist", methods=["POST"])
 @jwt_required()
 def add_to_watchlist():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     data    = request.get_json(silent=True) or {}
     ticker  = (data.get("ticker") or "").strip().upper()
     if not ticker:
@@ -34,7 +34,7 @@ def add_to_watchlist():
 @watchlist_bp.route("/watchlist/<ticker>", methods=["DELETE"])
 @jwt_required()
 def remove_from_watchlist(ticker: str):
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     ticker  = ticker.upper().strip()
     result, status = _svc.remove(user_id, ticker)
     return jsonify(result), status

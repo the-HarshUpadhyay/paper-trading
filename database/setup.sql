@@ -16,6 +16,7 @@
 -- ============================================================
 
 WHENEVER SQLERROR EXIT SQL.SQLCODE ROLLBACK;
+SET DEFINE OFF;
 
 PROMPT ============================================================
 PROMPT  Paper Trading Platform — Database Setup

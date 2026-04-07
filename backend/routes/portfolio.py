@@ -13,7 +13,7 @@ _svc = PortfolioService()
 @portfolio_bp.route("/portfolio", methods=["GET"])
 @jwt_required()
 def get_portfolio():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     result, status = _svc.get_portfolio(user_id)
     return jsonify(result), status
 
@@ -21,7 +21,7 @@ def get_portfolio():
 @portfolio_bp.route("/portfolio/snapshots", methods=["GET"])
 @jwt_required()
 def get_snapshots():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     days    = int(request.args.get("days", 30))
     result, status = _svc.get_snapshots(user_id, days)
     return jsonify(result), status

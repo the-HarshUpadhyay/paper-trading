@@ -53,7 +53,7 @@ class AuthService:
         if not bcrypt.checkpw(password.encode(), pw_hash.encode()):
             return {"error": "Invalid credentials"}, 401
 
-        token = create_access_token(identity=user_id)
+        token = create_access_token(identity=str(user_id))
         return {
             "token":    token,
             "user_id":  user_id,
