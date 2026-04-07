@@ -137,7 +137,7 @@ PORTFOLIO_SNAPSHOTS — Periodic portfolio valuations for growth chart
 
 ### Option A — Docker Compose (recommended)
 
-The easiest way to run the whole stack. Docker starts Oracle XE, the Flask backend, and the Vite frontend with a single command — no local Oracle install needed.
+The easiest way to run the whole stack. Docker starts Oracle XE, the Flask backend, and the Vite frontend with a single command — **no local Oracle installation or manual SQL setup required**. Database credentials, schemas, and data are automatically configured.
 
 **Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
@@ -212,8 +212,8 @@ cp .env.example .env   # then edit .env with your Oracle credentials
 ```env
 FLASK_DEBUG=1
 SECRET_KEY=your-long-random-secret-key
-ORACLE_USER=your_oracle_username
-ORACLE_PASSWORD=your_oracle_password
+ORACLE_USER=trader
+ORACLE_PASSWORD=trader
 ORACLE_DSN=localhost:1521/XEPDB1
 JWT_SECRET_KEY=another-long-random-secret
 JWT_ACCESS_TOKEN_EXPIRES=86400
@@ -311,8 +311,8 @@ Authorization: Bearer <jwt_token>
 
 | Variable | Default (manual) | Docker default | Description |
 |----------|-----------------|----------------|-------------|
-| `ORACLE_USER` | `system` | `trader` | Oracle DB username |
-| `ORACLE_PASSWORD` | `oracle` | `trader` | Oracle DB password |
+| `ORACLE_USER` | `trader` | `trader` | Oracle DB username |
+| `ORACLE_PASSWORD` | `trader` | `trader` | Oracle DB password |
 | `ORACLE_DSN` | `localhost:1521/XEPDB1` | `db:1521/XEPDB1` | Oracle connection string |
 | `SECRET_KEY` | — | — | Flask secret (change in production) |
 | `JWT_SECRET_KEY` | — | — | JWT signing secret (change in production) |
@@ -326,7 +326,7 @@ When using Docker Compose, `ORACLE_DSN` is automatically overridden to `db:1521/
 ## Production Checklist
 
 - [ ] Set strong `SECRET_KEY` and `JWT_SECRET_KEY` in `.env`
-- [ ] Switch Oracle pool credentials to a dedicated app user (not `system`)
+- [ ] Change the default `trader` database passwords for production
 - [ ] Run backend with `gunicorn` instead of `python app.py` (Linux/macOS only — use `waitress` on Windows)
 - [ ] Build frontend with `npm run build` and serve from a static host or Nginx
 - [ ] Enable HTTPS — update `CORS_ORIGINS` in `config.py` accordingly
