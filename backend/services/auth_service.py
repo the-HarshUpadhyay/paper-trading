@@ -16,7 +16,7 @@ class AuthService:
             with DBCursor(auto_commit=True) as cur:
                 cur.execute(
                     """INSERT INTO users (username, email, password_hash, balance)
-                       VALUES (:1, :2, :3, 100000.00)""",
+                       VALUES (:1, :2, :3, 1000000.00)""",
                     [username, email, pw_hash]
                 )
             return {"message": "Registration successful"}, 201

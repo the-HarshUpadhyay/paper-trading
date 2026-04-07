@@ -77,21 +77,24 @@ class StockService:
                     r["price"] = r["change_pct"] = None
 
         # 3. If query looks like a raw ticker not in DB, try yfinance directly
-        if not results and len(query) <= 6:
-            ticker = query.upper()
-            try:
-                info = yf.Ticker(ticker).info
-                if info.get("symbol"):
-                    results.append({
-                        "ticker":       info["symbol"],
-                        "company_name": info.get("longName") or info["symbol"],
-                        "sector":       info.get("sector", ""),
-                        "exchange":     info.get("exchange", ""),
-                        "price":        info.get("currentPrice") or info.get("regularMarketPrice"),
-                        "change_pct":   None,
-                    })
-            except Exception:
-                pass
+        #    Try with .NS suffix (NSE India) if the plain ticker fails
+        if not results and len(query) <= 15:
+            base = query.upper().rstrip(".")
+            for try_ticker in [base, f"{base}.NS", f"{base}.BO"]:
+                try:
+                    info = yf.Ticker(try_ticker).info
+                    if info.get("symbol"):
+                        results.append({
+                            "ticker":       info["symbol"],
+                            "company_name": info.get("longName") or info["symbol"],
+                            "sector":       info.get("sector", ""),
+                            "exchange":     info.get("exchange", ""),
+                            "price":        info.get("currentPrice") or info.get("regularMarketPrice"),
+                            "change_pct":   None,
+                        })
+                        break
+                except Exception:
+                    pass
 
         return results
 

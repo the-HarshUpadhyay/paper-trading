@@ -49,8 +49,8 @@ BEGIN
         IF v_user_balance < v_required_cash THEN
             RAISE_APPLICATION_ERROR(
                 -20002,
-                'Insufficient balance. Available: $' || TO_CHAR(v_user_balance,'FM999,999,990.00') ||
-                ', Required: $' || TO_CHAR(v_required_cash,'FM999,999,990.00')
+                'Insufficient balance. Available: Rs.' || TO_CHAR(v_user_balance,'FM99,99,99,990.00') ||
+                ', Required: Rs.' || TO_CHAR(v_required_cash,'FM99,99,99,990.00')
             );
         END IF;
     END IF;

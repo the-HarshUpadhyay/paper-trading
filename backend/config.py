@@ -31,4 +31,4 @@ class Config:
     CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
     # ── Misc ───────────────────────────────────────────────
-    STARTING_BALANCE = 100_000.00
+    STARTING_BALANCE = 1_000_000.00

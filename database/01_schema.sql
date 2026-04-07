@@ -37,7 +37,7 @@ CREATE TABLE users (
 );
 
 COMMENT ON TABLE  users             IS 'Registered platform users with paper-money balance';
-COMMENT ON COLUMN users.balance     IS 'Available cash for paper trading (default $100,000)';
+COMMENT ON COLUMN users.balance     IS 'Available cash for paper trading (default Rs.10,00,000)';
 COMMENT ON COLUMN users.is_active   IS '1=active, 0=deactivated';
 
 -- ============================================================
