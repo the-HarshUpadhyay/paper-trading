@@ -8,13 +8,11 @@ services:
       APP_USER: trader
       APP_USER_PASSWORD: trader
     ports:
-      - "1521:1521"
+      - "0:1521"
     volumes:
       - oracle_data:/opt/oracle/oradata
-      - ./database/01_schema.sql:/container-entrypoint-initdb.d/01_schema.sql
-      - ./database/02_triggers.sql:/container-entrypoint-initdb.d/02_triggers.sql
-      - ./database/03_procedures.sql:/container-entrypoint-initdb.d/03_procedures.sql
-      - ./database/04_sample_data.sql:/container-entrypoint-initdb.d/04_sample_data.sql
+      - ./database/docker-init.sh:/container-entrypoint-initdb.d/docker-init.sh
+      - ./database:/opt/db-scripts
     healthcheck:
       test: ["CMD", "healthcheck.sh"]
       interval: 30s
