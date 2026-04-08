@@ -40,7 +40,6 @@ class PendingOrderService:
                     return {"error": f"Ticker '{ticker}' not found"}, 404
                 stock_id = row[0]
 
-            out_var = None
             with DBCursor(auto_commit=True) as cur:
                 out_var = cur.var(oracledb.NUMBER)
                 cur.execute(

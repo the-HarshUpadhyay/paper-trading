@@ -3,7 +3,6 @@ routes/stocks.py — /stocks/tickers  /stocks/search  /stocks/<ticker>  /stocks/
                    /stocks/index/<ticker>
 """
 import os
-import json
 from flask import Blueprint, request, jsonify, send_file
 from flask_jwt_extended import jwt_required
 
@@ -48,7 +47,7 @@ def get_index_quote(ticker: str):
 @jwt_required()
 def search():
     q = (request.args.get("q") or "").strip()
-    if not q or len(q) < 1:
+    if not q:
         return jsonify([]), 200
 
     results = _svc.search(q)

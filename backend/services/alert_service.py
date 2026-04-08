@@ -13,7 +13,6 @@ class AlertService:
         ticker = ticker.upper()
         condition = condition.upper()
         try:
-            out_var = None
             with DBCursor(auto_commit=True) as cur:
                 out_var = cur.var(oracledb.NUMBER)
                 cur.execute(

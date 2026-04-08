@@ -153,7 +153,6 @@ function RegionSelector() {
 function IndexTicker() {
   const { region, formatPrice } = useRegion()
   const [quote, setQuote]   = useState(null)
-  const prevRegionRef       = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -170,7 +169,6 @@ function IndexTicker() {
         .catch(() => {})
     }, 60_000)
 
-    prevRegionRef.current = region.id
     return () => { cancelled = true; clearInterval(interval) }
   }, [region.index])
 

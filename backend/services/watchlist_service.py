@@ -177,7 +177,6 @@ class WatchlistService:
 
     def create_folder(self, user_id: int, name: str):
         try:
-            out_var = None
             with DBCursor(auto_commit=True) as cur:
                 out_var = cur.var(oracledb.NUMBER)
                 cur.execute(

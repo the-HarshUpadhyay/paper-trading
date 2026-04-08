@@ -71,7 +71,6 @@ class NotesService:
 
     def create(self, user_id: int, title: str, body: str, ticker: str | None = None):
         try:
-            out_var = None
             with DBCursor(auto_commit=True) as cur:
                 out_var = cur.var(oracledb.NUMBER)
                 cur.execute(
