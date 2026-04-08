@@ -1,17 +1,31 @@
 # PaperTrade — Financial Investment & Portfolio Management System
 
-A production-quality paper trading platform built with **Oracle 19c/XE**, **Python Flask**, and **React**. Practice stock trading with $100,000 in virtual cash, real-time prices via Yahoo Finance, and a clean Zerodha Kite-inspired UI.
+A production-quality paper trading platform built with **Oracle 21c XE**, **Python Flask**, and **React**. Practice stock trading with $1,000,000 in virtual cash, real-time prices via Yahoo Finance, multi-currency support, and a clean Zerodha Kite-inspired UI.
 
 ---
 
 ## Features
 
+### Core Trading
 - **Authentication** — Register/login with bcrypt-hashed passwords and JWT sessions
 - **Stock Search** — Debounced autocomplete with live prices from Yahoo Finance
 - **Real-Time Quotes** — Open/High/Low/Close, % change, market cap, P/E ratio
 - **Paper Trading** — Buy and sell stocks; PL/SQL triggers enforce all business rules
 - **Portfolio Dashboard** — Live P&L, holdings table, portfolio growth chart
-- **Watchlist** — Add/remove stocks, track price changes at a glance
+
+### New Features (v2)
+- **Pending / Limit Orders** — Place Limit, Stop, and Stop-Limit orders that auto-fill when the market price hits your target; cancel open orders at any time
+- **Price Alerts** — Set ABOVE/BELOW price alerts on any ticker; alerts fire automatically via the background scheduler and generate in-app notifications
+- **Notifications** — In-app notification feed; unread count badge in the header; mark-as-read support
+- **Trading Notes** — Create, edit, and delete personal notes optionally linked to a specific ticker
+- **Analytics Dashboard** — Portfolio growth chart (7D/1M/3M/6M/1Y), sector allocation pie, cash vs. holdings donut, P/L bar chart per holding, top/bottom performer cards
+- **Watchlist Folders** — Organise watchlist items into named folders; rename and delete folders; drag items between folders
+- **Multi-Currency / Region Support** — Display all prices and P&L in USD, INR, GBP, EUR, JPY, or HKD; live FX rates fetched daily from Yahoo Finance with hardcoded fallbacks
+- **Background Price Scheduler** — Daemon thread (`PriceScheduler`) refreshes active portfolio/watchlist prices every **15 seconds**; checks pending orders and alerts on each tick
+- **Full-Catalogue Price Refresh** — Secondary daemon (`price_refresh`) keeps the entire stock catalogue fresh every **300 seconds** and persists prices to the DB
+- **Thread-Safe In-Memory Cache** — `PriceCache` with separate TTLs (30 s price, 60 s full quote); deduplication prevents parallel fetches for the same ticker
+- **Health Check Endpoint** — `GET /api/health` returns service status and cache size
+- **Watchlist** — Add/remove stocks, track price changes; organised into folders
 - **Order History** — Paginated, immutable transaction ledger
 - **Charts** — Line and candlestick charts across 7 time periods
 - **Dark / Light Theme** — Toggleable, persisted across sessions
@@ -21,16 +35,17 @@ A production-quality paper trading platform built with **Oracle 19c/XE**, **Pyth
 
 ## Tech Stack
 
-| Layer      | Technology                               |
-|------------|------------------------------------------|
-| Database   | Oracle 21c XE (SQL + PL/SQL)             |
-| Backend    | Python 3.12, Flask, oracledb             |
-| Auth       | JWT (flask-jwt-extended), bcrypt         |
-| Market Data| yfinance (Yahoo Finance)                 |
-| Frontend   | React 18, React Router v6, Vite          |
-| Charts     | Recharts                                 |
-| Icons      | Lucide React                             |
-| Dev Infra  | Docker, Docker Compose                   |
+| Layer       | Technology                                      |
+|-------------|-------------------------------------------------|
+| Database    | Oracle 21c XE (SQL + PL/SQL)                    |
+| Backend     | Python 3.12, Flask, oracledb                    |
+| Auth        | JWT (flask-jwt-extended), bcrypt                |
+| Market Data | yfinance (Yahoo Finance)                        |
+| FX Rates    | yfinance Forex tickers (USDINR=X, etc.)         |
+| Frontend    | React 18, React Router v6, Vite                 |
+| Charts      | Recharts                                        |
+| Icons       | Lucide React                                    |
+| Dev Infra   | Docker, Docker Compose                          |
 
 ---
 
@@ -48,24 +63,42 @@ paper-trading/
 │
 ├── backend/
 │   ├── Dockerfile
-│   ├── app.py                 Flask application factory
-│   ├── config.py              Configuration (env vars)
+│   ├── app.py                 Flask application factory (v2: scheduler, migrations)
+│   ├── config.py              Configuration (env vars, starting balance = $1,000,000)
+│   ├── utils.py               Shared helpers (get_uid, scalar_out)
 │   ├── requirements.txt
 │   ├── .env.example
 │   ├── db/
-│   │   └── connection.py      Oracle connection pool + DBCursor
+│   │   ├── connection.py      Oracle connection pool + DBCursor context manager
+│   │   ├── schema_cache.sql   Cache table DDL
+│   │   └── migrations/
+│   │       ├── 001_notes.sql           NOTES table
+│   │       ├── 002_watchlist_folders.sql  WATCHLIST_FOLDERS + folder_id column
+│   │       ├── 003_pending_orders.sql  PENDING_ORDERS table
+│   │       └── 004_alerts.sql          PRICE_ALERTS + NOTIFICATIONS tables
 │   ├── routes/
 │   │   ├── auth.py            /register  /login  /me  /logout
 │   │   ├── stocks.py          /stocks/search  /stocks/<ticker>  /history
 │   │   ├── trading.py         /buy  /sell  /orders
 │   │   ├── portfolio.py       /portfolio  /portfolio/snapshots
-│   │   └── watchlist.py       /watchlist  (GET/POST/DELETE)
+│   │   ├── watchlist.py       /watchlist  /watchlist/folders  (CRUD + folder ops)
+│   │   ├── notes.py           /notes  (CRUD)
+│   │   ├── pending_orders.py  /orders/pending  (place, list, cancel)
+│   │   └── alerts.py          /alerts  /notifications  (CRUD + mark-read)
 │   └── services/
 │       ├── auth_service.py
 │       ├── stock_service.py
 │       ├── trading_service.py
 │       ├── portfolio_service.py
-│       └── watchlist_service.py
+│       ├── watchlist_service.py
+│       ├── notes_service.py
+│       ├── pending_order_service.py   (+ check_and_fill / check_and_fill_all)
+│       ├── alert_service.py           (+ check_alerts)
+│       ├── cache.py                   PriceCache (thread-safe, TTL-aware)
+│       ├── scheduler.py               PriceScheduler daemon (15 s tick)
+│       ├── price_refresh.py           Full-catalogue refresh daemon (300 s)
+│       ├── market_data.py             yfinance wrapper + batch refresh
+│       └── fx_service.py              Daily FX rates (USD/INR/GBP/EUR/JPY/HKD)
 │
 └── frontend/
     ├── Dockerfile
@@ -78,39 +111,54 @@ paper-trading/
         ├── services/api.js     Axios instance + all API calls
         ├── context/
         │   ├── AuthContext.jsx
-        │   └── ThemeContext.jsx
+        │   ├── ThemeContext.jsx
+        │   └── RegionContext.jsx      ← NEW: currency/region state + formatters
         ├── hooks/
         │   ├── useDebounce.js
         │   └── useLocalStorage.js
         ├── components/
         │   ├── Sidebar.jsx
-        │   ├── Header.jsx
+        │   ├── Header.jsx             (notification bell + unread badge)
         │   ├── StockSearch.jsx
         │   ├── PriceChart.jsx
         │   ├── OrderForm.jsx
         │   └── LoadingSkeleton.jsx
-        ├── pages/
-        │   ├── Login.jsx
-        │   ├── Register.jsx
-        │   ├── Dashboard.jsx
-        │   ├── StockDetail.jsx
-        │   ├── Orders.jsx
-        │   └── Watchlist.jsx
-        └── styles/
-            └── index.css
+        └── pages/
+            ├── Login.jsx
+            ├── Register.jsx
+            ├── Dashboard.jsx
+            ├── StockDetail.jsx
+            ├── Orders.jsx
+            ├── Watchlist.jsx          (+ folder management)
+            ├── PendingOrders.jsx      ← NEW
+            ├── Alerts.jsx             ← NEW
+            ├── Notes.jsx              ← NEW
+            └── Analytics.jsx          ← NEW
 ```
 
 ---
 
 ## Database Schema
 
+### Core Tables (01_schema.sql)
+
 ```
-USERS               — Registered users with paper-money balance ($100,000 default)
+USERS               — Registered users with paper-money balance ($1,000,000 default)
 STOCKS              — Stock catalogue (populated on first search/trade)
 TRANSACTIONS        — Immutable trade ledger (BUY / SELL)
 HOLDINGS            — Live open positions per user (maintained by trigger)
 WATCHLIST           — User-specific stock watchlist
 PORTFOLIO_SNAPSHOTS — Periodic portfolio valuations for growth chart
+```
+
+### Migration Tables (auto-applied at startup)
+
+```
+NOTES               — User trading journal entries, optionally linked to a ticker
+WATCHLIST_FOLDERS   — Named folders for organising watchlist items
+PRICE_ALERTS        — Price threshold alerts (ABOVE / BELOW) per user/ticker
+NOTIFICATIONS       — In-app notifications generated when an alert triggers
+PENDING_ORDERS      — Limit / Stop / Stop-Limit orders awaiting execution
 ```
 
 ### PL/SQL Objects
@@ -137,8 +185,6 @@ PORTFOLIO_SNAPSHOTS — Periodic portfolio valuations for growth chart
 
 ### Option A — Docker Compose (recommended)
 
-The easiest way to run the whole stack. Docker starts Oracle XE, the Flask backend, and the Vite frontend with a single command — **no local Oracle installation or manual SQL setup required**. Database credentials, schemas, and data are automatically configured.
-
 **Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
 ```bash
@@ -155,7 +201,7 @@ docker compose up
 | Backend API | http://localhost:5000 |
 | Oracle | localhost:1521 (XEPDB1) |
 
-The SQL init scripts (`01_schema.sql` → `04_sample_data.sql`) run automatically on first boot. Database state persists in a named Docker volume (`oracle_data`) between restarts.
+The SQL init scripts (`01_schema.sql` → `04_sample_data.sql`) run automatically on first boot. Migration scripts (`001_notes.sql` → `004_alerts.sql`) are applied automatically every time the backend starts — they are idempotent and safe to re-run. Database state persists in a named Docker volume (`oracle_data`) between restarts.
 
 **Useful commands:**
 
@@ -175,8 +221,6 @@ docker compose logs -f backend
 ---
 
 ### Option B — Manual Setup
-
-Use this if you already have Oracle running locally and prefer to manage each process yourself.
 
 **Prerequisites:**
 - Oracle Database 19c or XE (with SQL Developer / SQL*Plus)
@@ -201,6 +245,8 @@ Or open each script in SQL Developer and run them in order:
 ```
 
 > **Note:** The demo user `demo_trader` in `04_sample_data.sql` has a placeholder password hash. Register a real account through the UI instead.
+>
+> The migration tables (`NOTES`, `WATCHLIST_FOLDERS`, `PENDING_ORDERS`, `PRICE_ALERTS`, `NOTIFICATIONS`) are created automatically when the Flask backend starts for the first time.
 
 #### 2. Backend
 
@@ -225,7 +271,7 @@ python app.py
 # API running at http://localhost:5000
 ```
 
-> **Oracle Instant Client (thick mode):** uncomment and set `lib_dir` in [db/connection.py](backend/db/connection.py#L13).
+> **Oracle Instant Client (thick mode):** uncomment and set `lib_dir` in [db/connection.py](backend/db/connection.py).
 
 #### 3. Frontend
 
@@ -265,9 +311,16 @@ Authorization: Bearer <jwt_token>
 ### Trading
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/buy` | Execute a buy order `{ticker, quantity, price}` |
-| POST | `/api/sell` | Execute a sell order `{ticker, quantity, price}` |
+| POST | `/api/buy` | Execute a market buy `{ticker, quantity, price}` |
+| POST | `/api/sell` | Execute a market sell `{ticker, quantity, price}` |
 | GET  | `/api/orders?page=1&per_page=20` | Paginated transaction history |
+
+### Pending (Limit/Stop) Orders
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST   | `/api/orders/pending` | Place a limit/stop order `{ticker, side, order_type, quantity, limit_price?, stop_price?, expires_at?}` |
+| GET    | `/api/orders/pending?status=OPEN` | List pending orders (status: OPEN \| FILLED \| CANCELLED) |
+| DELETE | `/api/orders/pending/<order_id>` | Cancel an open order |
 
 ### Portfolio
 | Method | Endpoint | Description |
@@ -281,6 +334,33 @@ Authorization: Bearer <jwt_token>
 | GET    | `/api/watchlist` | Get all watchlist items with live prices |
 | POST   | `/api/watchlist` | Add a ticker `{ticker}` |
 | DELETE | `/api/watchlist/<ticker>` | Remove a ticker |
+| POST   | `/api/watchlist/folders` | Create a folder `{name}` |
+| PATCH  | `/api/watchlist/folders/<folder_id>` | Rename a folder `{name}` |
+| DELETE | `/api/watchlist/folders/<folder_id>` | Delete a folder |
+| PATCH  | `/api/watchlist/<watchlist_id>/folder` | Move item to folder `{folder_id}` |
+
+### Notes
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET    | `/api/notes?ticker=AAPL` | List notes (optional ticker filter) |
+| GET    | `/api/notes/<note_id>` | Get a single note |
+| POST   | `/api/notes` | Create a note `{title, body?, ticker?}` |
+| PUT    | `/api/notes/<note_id>` | Update note `{title?, body?}` |
+| DELETE | `/api/notes/<note_id>` | Delete a note |
+
+### Alerts & Notifications
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET    | `/api/alerts` | List active price alerts |
+| POST   | `/api/alerts` | Create an alert `{ticker, condition, target_price}` — condition: `ABOVE` or `BELOW` |
+| DELETE | `/api/alerts/<alert_id>` | Delete an alert |
+| GET    | `/api/notifications?unread_only=true` | List notifications |
+| POST   | `/api/notifications/read` | Mark notifications as read `{ids: [...]}` |
+
+### Health
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Service status + cache entry count |
 
 ---
 
@@ -289,11 +369,15 @@ Authorization: Bearer <jwt_token>
 | Route | Page | Description |
 |-------|------|-------------|
 | `/login` | Login | Username + password sign-in |
-| `/register` | Register | New account with $100,000 starting balance |
+| `/register` | Register | New account with $1,000,000 starting balance |
 | `/dashboard` | Dashboard | Portfolio stats, growth chart, holdings table |
 | `/stocks/:ticker` | Stock Detail | Live quote, key stats, interactive chart, trade button |
-| `/watchlist` | Watchlist | Add/remove stocks, quick trade from list |
-| `/orders` | Orders | Full paginated transaction history |
+| `/watchlist` | Watchlist | Add/remove stocks; organise into folders; quick trade |
+| `/orders` | Orders | Full paginated market order history |
+| `/pending-orders` | Pending Orders | Limit/Stop orders — place, view status, cancel |
+| `/alerts` | Alerts | Set and manage price alerts; view triggered notifications |
+| `/notes` | Notes | Personal trading journal; filter by ticker |
+| `/analytics` | Analytics | Portfolio analytics — growth chart, sector allocation, P/L breakdown |
 
 ---
 
@@ -304,6 +388,38 @@ Authorization: Bearer <jwt_token>
 3. **Immutable ledger** — The `TRANSACTIONS` table is never updated or deleted; holdings are derived from it
 4. **VWAP cost basis** — `trg_update_holdings` recalculates average buy price as a volume-weighted average on each new purchase
 5. **Portfolio snapshots** — Saved automatically after every trade for the growth chart
+6. **Pending order auto-fill** — Every scheduler tick (~15 s), `check_and_fill_all` evaluates all OPEN pending orders against the current cached price and executes the trade when triggered
+7. **Alert one-shot** — Once a price alert fires it is marked `is_active = 0`; a notification row is inserted and the user's unread count increments
+8. **Idempotent migrations** — Migration scripts use `CREATE TABLE … IF NOT EXISTS` equivalent patterns so they can be safely re-applied on restart
+
+---
+
+## Background Services
+
+| Service | Class / Function | Interval | What it does |
+|---------|-----------------|----------|--------------|
+| Price Scheduler | `PriceScheduler` | 15 s | Fetches prices for active holdings + watchlist tickers; checks pending orders; fires alerts |
+| Price Refresh Daemon | `start_refresh_daemon` | 300 s | Refreshes the entire stock catalogue; persists prices to DB |
+| FX Rate Service | `fx_service.get_rates()` | Daily | Fetches live forex rates from yfinance; used by the region/currency context |
+
+---
+
+## Multi-Currency Support
+
+The frontend `RegionContext` lets users switch display currency. All monetary values are internally stored in the stock's native currency but converted on the fly using the FX service.
+
+Supported regions/currencies:
+
+| Region | Currency | Symbol |
+|--------|----------|--------|
+| US | USD | $ |
+| India | INR | ₹ |
+| UK | GBP | £ |
+| Europe | EUR | € |
+| Japan | JPY | ¥ |
+| Hong Kong | HKD | HK$ |
+
+> **Note:** Cash balance is stored in INR by default (based on `STARTING_BALANCE = 1,000,000`). The region context converts it to the selected display currency using live daily FX rates.
 
 ---
 
@@ -311,26 +427,60 @@ Authorization: Bearer <jwt_token>
 
 | Variable | Default (manual) | Docker default | Description |
 |----------|-----------------|----------------|-------------|
-| `ORACLE_USER` | `trader` | `trader` | Oracle DB username |
-| `ORACLE_PASSWORD` | `trader` | `trader` | Oracle DB password |
+| `ORACLE_USER` | `system` | `trader` | Oracle DB username |
+| `ORACLE_PASSWORD` | `oracle` | `trader` | Oracle DB password |
 | `ORACLE_DSN` | `localhost:1521/XEPDB1` | `db:1521/XEPDB1` | Oracle connection string |
-| `SECRET_KEY` | — | — | Flask secret (change in production) |
-| `JWT_SECRET_KEY` | — | — | JWT signing secret (change in production) |
+| `SECRET_KEY` | `dev-secret-change-me` | — | Flask secret (change in production) |
+| `JWT_SECRET_KEY` | same as SECRET_KEY | — | JWT signing secret (change in production) |
 | `JWT_ACCESS_TOKEN_EXPIRES` | `86400` | `86400` | Token lifetime in seconds (24 hours) |
 | `FLASK_DEBUG` | `0` | `1` | Enable Flask debug mode |
+| `PRICE_REFRESH_INTERVAL` | `300` | `300` | Full catalogue refresh interval (seconds) |
+| `PRICE_STALE_SECONDS` | `600` | `600` | Age threshold before a cached price is considered stale |
 
 When using Docker Compose, `ORACLE_DSN` is automatically overridden to `db:1521/XEPDB1` (using the `db` service name) regardless of what is set in `backend/.env`.
+
+---
+
+## Known Issues & Potential Bugs
+
+> These are documented for awareness and future fixes.
+
+### Backend
+
+1. **`list_notifications` uses `get_jwt_identity()` without import** — In `routes/alerts.py` line 49, `list_notifications` calls `int(get_jwt_identity())` directly instead of using the shared `get_uid()` helper. `get_jwt_identity` is not explicitly imported in that file. This will raise a `NameError` at runtime when the endpoint is called. **Fix:** replace with `user_id = get_uid()`.
+
+2. **`move_item` uses `get_jwt_identity()` without import** — Same issue in `routes/watchlist.py` line 79: `int(get_jwt_identity())` is called without importing it. Use `get_uid()` instead.
+
+3. **`STARTING_BALANCE` mismatch** — `config.py` sets `STARTING_BALANCE = 1_000_000.00` but the README previously advertised $100,000. Ensure `04_sample_data.sql` and any seed `INSERT` statements use the same value, otherwise new accounts created via the UI and seeded demo accounts will have different balances.
+
+4. **FX rate fetch holds the lock during network I/O** — `fx_service.py` calls `yf.download()` while holding `_lock`. If the Yahoo Finance request is slow, all concurrent threads waiting for FX rates will block. Consider releasing the lock before fetching and using a double-checked locking pattern.
+
+5. **`alert_service.mark_read` SQL injection risk (low severity)** — The placeholders string is built via f-string with `len(notif_ids)`. Since the count, not the values, drives the f-string this is safe in practice, but the pattern is fragile. Prefer a fixed `IN (SELECT column_value FROM TABLE(:1))` binding.
+
+6. **Pending order `STOP_LIMIT` BUY logic** — In `pending_order_service.py`, a `STOP_LIMIT BUY` triggers when `current_price >= stop_p`, which is atypical (a buy stop-limit usually triggers above the stop and fills at the limit). Verify this matches the intended trading semantics.
+
+7. **`price_cache` singleton shared between Flask workers** — If the backend is later scaled with multiple processes (e.g. gunicorn `--workers N`), each worker will have its own in-memory cache, leading to stale/inconsistent prices across workers. For multi-process deployments, migrate the cache to Redis.
+
+### Frontend
+
+8. **`RegionContext` cash balance hardcoded to INR** — `Analytics.jsx` line 122 converts `cash_balance` with `toUSD(portfolio?.cash_balance || 0, 'INR')`. If the backend ever stores balances in a different currency, this will silently produce wrong numbers.
+
+9. **Error swallowing in `fetchPortfolio` / `fetchSnapshots`** — Both async functions catch all errors with an empty `catch (_) {}` block, so API failures are invisible to the user. Add user-facing error state.
+
+10. **`PriceScheduler` ticker list refreshes every 60 s** — Stocks added to a watchlist or bought within the last 60 s may not be refreshed until the next ticker-list reload. This is by design but can cause temporarily stale prices on newly added items.
 
 ---
 
 ## Production Checklist
 
 - [ ] Set strong `SECRET_KEY` and `JWT_SECRET_KEY` in `.env`
-- [ ] Change the default `trader` database passwords for production
-- [ ] Run backend with `gunicorn` instead of `python app.py` (Linux/macOS only — use `waitress` on Windows)
-- [ ] Build frontend with `npm run build` and serve from a static host or Nginx
+- [ ] Change the default `trader` / `oracle` database passwords
+- [ ] Run backend with `gunicorn` (Linux/macOS) or `waitress` (Windows) — **not** `python app.py`
+- [ ] Build frontend with `npm run build` and serve via Nginx or a static host
 - [ ] Enable HTTPS — update `CORS_ORIGINS` in `config.py` accordingly
-- [ ] Consider rate-limiting the `/api/stocks/*` endpoints (Yahoo Finance has informal limits)
+- [ ] Fix `get_jwt_identity()` import bug in `routes/alerts.py` and `routes/watchlist.py` before deploying
+- [ ] Consider rate-limiting `/api/stocks/*` endpoints (Yahoo Finance has informal limits)
+- [ ] For multi-process deployments, migrate `PriceCache` to Redis to share state across workers
 
 ---
 
@@ -340,8 +490,12 @@ When using Docker Compose, `ORACLE_DSN` is automatically overridden to `db:1521/
 |------|-------------|
 | Dashboard | Portfolio value, P&L stats, growth chart, holdings table |
 | Stock Detail | Live price, candlestick chart, key statistics, trade modal |
-| Watchlist | Live price tracking with quick-trade buttons |
-| Orders | Full transaction history with pagination |
+| Watchlist | Live price tracking with folder organisation and quick-trade buttons |
+| Orders | Full market order history with pagination |
+| Pending Orders | Limit/Stop order management — status tracking, cancel |
+| Alerts | Price alert setup and in-app notification feed |
+| Notes | Trading journal with optional ticker tagging |
+| Analytics | Sector allocation, cash vs. holdings, P/L breakdown, top/bottom performers |
 
 ---
 
