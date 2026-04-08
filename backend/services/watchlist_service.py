@@ -26,7 +26,8 @@ class WatchlistService:
 
     def get_watchlist(self, user_id: int):
         """
-        Return the user's watchlist enriched with latest prices.
+        Return the user's watchlist enriched with latest prices, plus ALL
+        folders for this user (including empty ones).
         Prices come from the shared in-memory cache; no yfinance call here.
         """
         try:
@@ -45,8 +46,18 @@ class WatchlistService:
                 )
                 rows = cur.fetchall()
 
+                # Fetch ALL folders for this user so empty folders are visible
+                cur.execute(
+                    """SELECT folder_id, name FROM watchlist_folders
+                        WHERE user_id = :1 ORDER BY created_at""",
+                    [user_id],
+                )
+                folder_rows = cur.fetchall()
+
+            folders = [{"folder_id": r[0], "name": r[1]} for r in folder_rows]
+
             if not rows:
-                return {"watchlist": []}, 200
+                return {"watchlist": [], "folders": folders}, 200
 
             items = [
                 {
@@ -73,7 +84,7 @@ class WatchlistService:
                 item["price"]      = data.get("price",      0.0)
                 item["change_pct"] = data.get("change_pct", 0.0)
 
-            return {"watchlist": items}, 200
+            return {"watchlist": items, "folders": folders}, 200
 
         except Exception as e:
             logger.error("get_watchlist(user=%s) failed: %s", user_id, e)

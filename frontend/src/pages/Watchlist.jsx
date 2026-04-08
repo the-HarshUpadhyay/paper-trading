@@ -40,19 +40,8 @@ export default function Watchlist() {
     setError(null)
     try {
       const { data } = await watchlistAPI.get()
-      const wl = data.watchlist || []
-      setItems(wl)
-      // Derive unique folders
-      const seen = new Set()
-      const f = []
-      for (const item of wl) {
-        const key = item.folder_id ?? '__none__'
-        if (!seen.has(key)) {
-          seen.add(key)
-          f.push({ folder_id: item.folder_id, name: item.folder_name || 'Uncategorised' })
-        }
-      }
-      setFolders(f)
+      setItems(data.watchlist || [])
+      setFolders(data.folders || [])
     } catch (e) {
       setError(e.response?.data?.error || 'Failed to load watchlist')
     } finally {
@@ -158,16 +147,20 @@ export default function Watchlist() {
   // Per-item price formatter — uses the ticker's actual currency as source
   const fmtPrice = (n, ticker) => formatPrice(n, { from: tickerCurrency(ticker) })
 
-  // Group items by folder
-  const groupedItems = folders.map((f) => ({
-    ...f,
-    items: items.filter((i) => (i.folder_id ?? null) === (f.folder_id ?? null)),
-  }))
+  // Group items by folder; always include Uncategorised for items with no folder
+  const uncategorisedItems = items.filter((i) => i.folder_id == null)
+  const groupedItems = [
+    ...folders.map((f) => ({
+      ...f,
+      items: items.filter((i) => i.folder_id === f.folder_id),
+    })),
+    { folder_id: null, name: 'Uncategorised', items: uncategorisedItems },
+  ]
 
   // Collect folder options for the move dropdown
   const folderOptions = [
     { folder_id: null, name: 'Uncategorised' },
-    ...folders.filter((f) => f.folder_id != null),
+    ...folders,
   ]
 
   return (
@@ -224,11 +217,11 @@ export default function Watchlist() {
               </form>
               {folderError && <p className="form-error">{folderError}</p>}
 
-              {folders.filter((f) => f.folder_id != null).length === 0 ? (
+              {folders.length === 0 ? (
                 <p className="text-muted" style={{ fontSize: '0.82rem' }}>No folders yet.</p>
               ) : (
                 <ul className="folder-list">
-                  {folders.filter((f) => f.folder_id != null).map((f) => (
+                  {folders.map((f) => (
                     <li key={f.folder_id} className="folder-list-item">
                       {renamingId === f.folder_id ? (
                         <input
