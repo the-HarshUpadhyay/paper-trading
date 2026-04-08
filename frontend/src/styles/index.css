@@ -1062,7 +1062,8 @@ input, select, textarea { font-family: var(--font); }
   margin-top: 12px;
 }
 
-.add-ticker-form .form-input { max-width: 220px; }
+.add-ticker-form .form-input { max-width: 260px; }
+.add-ticker-form .ticker-input-wrap { max-width: 260px; }
 
 .action-btns { display: flex; gap: 4px; align-items: center; }
 
@@ -1390,7 +1391,8 @@ input, select, textarea { font-family: var(--font); }
   flex-wrap: wrap;
 }
 
-.alert-form .form-input { max-width: 180px; }
+.alert-form .form-input        { max-width: 180px; }
+.alert-form .ticker-input-wrap { max-width: 220px; }
 
 .condition-toggle {
   display: flex;
@@ -1519,74 +1521,119 @@ input, select, textarea { font-family: var(--font); }
 
 .notif-dropdown-item:last-child { border-bottom: none; }
 
-/* ── Watchlist folders ───────────────────────────────────────── */
-.folder-mgr-toggle {
+/* ── Watchlist Kite-style tabs ───────────────────────────────── */
+.wl-card { padding: 0; overflow: hidden; }
+
+.wl-tabs {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--card-bg);
+  padding: 0 4px;
+  gap: 0;
+}
+.wl-tabs::-webkit-scrollbar { display: none; }
+
+.wl-tab {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
+  padding: 10px 14px;
   background: none;
   border: none;
-  color: var(--text-sub);
-  font-size: 0.88rem;
-  font-weight: 500;
-  width: 100%;
-  text-align: left;
-  padding: 0;
-}
-
-.folder-mgr-toggle:hover { color: var(--text); }
-
-.folder-mgr-body {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-
-.folder-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.folder-list-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-alt);
-}
-
-.folder-name {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
-  color: var(--text-sub);
-}
-
-.folder-group {
-  margin-bottom: 8px;
-}
-
-.folder-group:last-child { margin-bottom: 0; }
-
-.folder-group-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 4px 6px;
-  font-size: 0.78rem;
-  font-weight: 600;
+  border-bottom: 2px solid transparent;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 2px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+  margin-bottom: -1px;
+}
+.wl-tab:hover { color: var(--text); }
+.wl-tab.active {
+  color: var(--brand);
+  border-bottom-color: var(--brand);
+}
+.wl-tab.wl-tab-creating { cursor: default; }
+
+.wl-tab-name { line-height: 1; }
+
+.wl-tab-count {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: var(--bg-alt);
+  border-radius: 8px;
+  padding: 1px 5px;
+  line-height: 1.4;
+  min-width: 18px;
+  text-align: center;
+}
+.wl-tab.active .wl-tab-count {
+  background: color-mix(in srgb, var(--brand) 15%, transparent);
+  color: var(--brand);
 }
 
+.wl-tab-x {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-left: 1px;
+}
+.wl-tab:hover .wl-tab-x { display: flex; }
+.wl-tab-x:hover { background: var(--hover-bg); color: var(--red); }
+
+.wl-tab-rename {
+  background: var(--input-bg);
+  border: 1px solid var(--input-focus);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  outline: none;
+  min-width: 60px;
+}
+
+.wl-tab-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  transition: color 0.15s;
+  margin-bottom: -1px;
+}
+.wl-tab-add:hover { color: var(--brand); }
+
+.wl-tabs-spacer { flex: 1; }
+
+.wl-refresh {
+  display: flex;
+  align-items: center;
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.wl-content { padding: 0; }
+.wl-content .table-wrap { border-radius: 0; }
+.wl-content .empty-state { padding: 48px 24px; }
+.wl-content .error-banner { border-radius: 0; }
+
+/* ── Watchlist move-to dropdown ──────────────────────────────── */
 .folder-select {
   background: var(--input-bg);
   border: 1px solid var(--input-border);
@@ -1636,7 +1683,8 @@ input, select, textarea { font-family: var(--font); }
     flex-direction: column;
     align-items: stretch;
   }
-  .alert-form .form-input { max-width: 100%; }
+  .alert-form .form-input        { max-width: 100%; }
+  .alert-form .ticker-input-wrap { max-width: 100%; }
   .condition-toggle { justify-content: flex-start; }
 }
 
@@ -1651,14 +1699,7 @@ input, select, textarea { font-family: var(--font); }
   text-transform: uppercase;
 }
 
-/* ── Watchlist folder group spacing ─────────────────────────── */
-.folder-group:not(:last-child) {
-  margin-bottom: 16px;
-}
-
-/* ── Folder list item hover ──────────────────────────────────── */
-.folder-list-item { transition: background 0.12s; }
-.folder-list-item:hover { background: var(--hover-bg); }
+/* ── Pending orders modal on mobile (placeholder kept) ──────── */
 
 /* ── Pending orders modal on mobile ─────────────────────────── */
 @media (max-width: 500px) {
@@ -1690,8 +1731,103 @@ input, select, textarea { font-family: var(--font); }
 .stat-value.pos { color: var(--green); }
 .stat-value.neg { color: var(--red); }
 
-/* ── Folder group header icon ────────────────────────────────── */
-.folder-group-header svg { opacity: 0.7; }
+
+/* ── TickerInput autocomplete ────────────────────────────────── */
+.ticker-input-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.ticker-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  list-style: none;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  overflow: hidden;
+  padding: 4px 0;
+}
+
+.ticker-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.ticker-dropdown-item:hover,
+.ticker-dropdown-item.active { background: var(--hover-bg); }
+
+.ticker-dd-symbol {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 100px;
+  font-family: var(--font-mono, monospace);
+}
+
+.ticker-dd-name {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── StockDetail watchlist folder picker ─────────────────────── */
+.wl-add-wrap {
+  position: relative;
+}
+
+.wl-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wl-folder-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 300;
+  min-width: 180px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  overflow: hidden;
+  animation: fadeDown 0.12s ease;
+}
+
+.wl-fp-header {
+  padding: 7px 12px 5px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wl-fp-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: var(--text-sub);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.wl-fp-item:hover { background: var(--hover-bg); color: var(--text); }
 
 /* ── Region selector ─────────────────────────────────────────── */
 .region-selector { position: relative; }

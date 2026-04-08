@@ -104,7 +104,7 @@ export default function Dashboard() {
   const fetchSnapshots = useCallback(async () => {
     setSnapLoading(true)
     try {
-      const { data } = await portfolioAPI.snapshots(30)
+      const { data } = await portfolioAPI.snapshots(730)
       setSnapshots(data.snapshots || [])
     } catch (_) {}
     finally { setSnapLoading(false) }

@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   TrendingUp, TrendingDown, Star, StarOff,
-  ShoppingCart, RefreshCw, ChevronLeft, ExternalLink,
+  ShoppingCart, RefreshCw, ChevronLeft, ChevronDown,
 } from 'lucide-react'
 import Header from '../components/Header'
 import PriceChart from '../components/PriceChart'
@@ -45,6 +45,10 @@ export default function StockDetail() {
   const [inWatchlist, setInWatchlist] = useState(false)
   const [wlLoading, setWlLoading] = useState(false)
   const [orderSuccess, setOrderSuccess] = useState(null)
+  // Watchlist folder picker
+  const [folders, setFolders]           = useState([])
+  const [showFolderPicker, setShowFolderPicker] = useState(false)
+  const folderPickerRef = useRef(null)
 
   const fetchQuote = useCallback(async () => {
     setLoading(true)
@@ -63,6 +67,7 @@ export default function StockDetail() {
     try {
       const { data } = await watchlistAPI.get()
       setInWatchlist(data.watchlist?.some((w) => w.ticker === ticker))
+      setFolders(data.folders || [])
     } catch (_) {}
   }, [ticker])
 
@@ -71,16 +76,38 @@ export default function StockDetail() {
     checkWatchlist()
   }, [fetchQuote, checkWatchlist])
 
-  const toggleWatchlist = async () => {
+  // Close folder picker on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (folderPickerRef.current && !folderPickerRef.current.contains(e.target)) {
+        setShowFolderPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const handleUnwatch = async () => {
     setWlLoading(true)
     try {
-      if (inWatchlist) {
-        await watchlistAPI.remove(ticker)
-        setInWatchlist(false)
-      } else {
-        await watchlistAPI.add(ticker)
-        setInWatchlist(true)
+      await watchlistAPI.remove(ticker)
+      setInWatchlist(false)
+    } catch (_) {}
+    finally { setWlLoading(false) }
+  }
+
+  const handleAddToFolder = async (folderId) => {
+    setShowFolderPicker(false)
+    setWlLoading(true)
+    try {
+      await watchlistAPI.add(ticker)
+      if (folderId !== null) {
+        // Move to specific folder — need the watchlist_id
+        const { data } = await watchlistAPI.get()
+        const item = data.watchlist?.find((w) => w.ticker === ticker && w.folder_id == null)
+        if (item) await watchlistAPI.moveItem(item.watchlist_id, folderId)
       }
+      setInWatchlist(true)
     } catch (_) {}
     finally { setWlLoading(false) }
   }
@@ -147,15 +174,49 @@ export default function StockDetail() {
                 </div>
 
                 <div className="stock-actions">
-                  <button
-                    className={`btn ${inWatchlist ? 'btn-ghost' : 'btn-outline'}`}
-                    onClick={toggleWatchlist}
-                    disabled={wlLoading}
-                    title={inWatchlist ? 'Remove from watchlist' : 'Add to watchlist'}
-                  >
-                    {inWatchlist ? <StarOff size={15} /> : <Star size={15} />}
-                    {inWatchlist ? 'Unwatch' : 'Watch'}
-                  </button>
+                  {inWatchlist ? (
+                    <button
+                      className="btn btn-ghost"
+                      onClick={handleUnwatch}
+                      disabled={wlLoading}
+                      title="Remove from watchlist"
+                    >
+                      <StarOff size={15} /> Unwatch
+                    </button>
+                  ) : (
+                    <div className="wl-add-wrap" ref={folderPickerRef}>
+                      <button
+                        className="btn btn-outline wl-add-btn"
+                        onClick={() => setShowFolderPicker((v) => !v)}
+                        disabled={wlLoading}
+                        title="Add to watchlist"
+                      >
+                        <Star size={15} />
+                        Watch
+                        <ChevronDown size={13} style={{ marginLeft: 2 }} />
+                      </button>
+                      {showFolderPicker && (
+                        <div className="wl-folder-picker">
+                          <div className="wl-fp-header">Add to list</div>
+                          <button
+                            className="wl-fp-item"
+                            onMouseDown={() => handleAddToFolder(null)}
+                          >
+                            Watchlist (default)
+                          </button>
+                          {folders.map((f) => (
+                            <button
+                              key={f.folder_id}
+                              className="wl-fp-item"
+                              onMouseDown={() => handleAddToFolder(f.folder_id)}
+                            >
+                              {f.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button
                     className="btn btn-primary"
                     onClick={() => setShowOrder(true)}

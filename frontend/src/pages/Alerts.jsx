@@ -3,6 +3,7 @@ import {
   Bell, BellOff, Trash2, Plus, Loader2, CheckCheck,
 } from 'lucide-react'
 import Header from '../components/Header'
+import TickerInput from '../components/TickerInput'
 import { alertsAPI } from '../services/api'
 import { useRegion, tickerCurrency } from '../context/RegionContext'
 
@@ -114,12 +115,12 @@ export default function Alerts() {
             Create Price Alert
           </h2>
           <form className="alert-form" onSubmit={handleCreate}>
-            <input
-              className="form-input"
-              placeholder="Ticker (e.g. AAPL)"
+            <TickerInput
               value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              maxLength={15}
+              onChange={setTicker}
+              onSelect={(t) => setTicker(t)}
+              placeholder="Search ticker (e.g. RELIANCE.NS)"
+              disabled={creating}
             />
             <div className="condition-toggle">
               {['ABOVE', 'BELOW'].map((c) => (
