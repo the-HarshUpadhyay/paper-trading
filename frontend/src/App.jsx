@@ -1,15 +1,20 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
+import { RegionProvider } from './context/RegionContext'
 import Sidebar from './components/Sidebar'
 
 // Pages
-import Login     from './pages/Login'
-import Register  from './pages/Register'
-import Dashboard from './pages/Dashboard'
-import StockDetail from './pages/StockDetail'
-import Orders    from './pages/Orders'
-import Watchlist from './pages/Watchlist'
+import Login          from './pages/Login'
+import Register       from './pages/Register'
+import Dashboard      from './pages/Dashboard'
+import StockDetail    from './pages/StockDetail'
+import Orders         from './pages/Orders'
+import Watchlist      from './pages/Watchlist'
+import PendingOrders  from './pages/PendingOrders'
+import Alerts         from './pages/Alerts'
+import Notes          from './pages/Notes'
+import Analytics      from './pages/Analytics'
 
 /** Wraps authenticated routes — redirects to /login if not logged in */
 function ProtectedLayout() {
@@ -46,6 +51,7 @@ function PublicLayout() {
 export default function App() {
   return (
     <ThemeProvider>
+      <RegionProvider>
       <AuthProvider>
         <BrowserRouter>
           <Routes>
@@ -61,6 +67,10 @@ export default function App() {
               <Route path="/stocks/:ticker" element={<StockDetail />} />
               <Route path="/orders"         element={<Orders />} />
               <Route path="/watchlist"      element={<Watchlist />} />
+              <Route path="/pending-orders" element={<PendingOrders />} />
+              <Route path="/alerts"         element={<Alerts />} />
+              <Route path="/notes"          element={<Notes />} />
+              <Route path="/analytics"      element={<Analytics />} />
             </Route>
 
             {/* Catch-all */}
@@ -68,6 +78,7 @@ export default function App() {
           </Routes>
         </BrowserRouter>
       </AuthProvider>
+      </RegionProvider>
     </ThemeProvider>
   )
 }

@@ -1,0 +1,296 @@
+import { useState, useEffect, useCallback } from 'react'
+import {
+  Bell, BellOff, Trash2, Plus, Loader2, CheckCheck,
+} from 'lucide-react'
+import Header from '../components/Header'
+import { alertsAPI } from '../services/api'
+import { useRegion, tickerCurrency } from '../context/RegionContext'
+
+export default function Alerts() {
+  const { formatPrice } = useRegion()
+  const fmt = (n, ticker) => formatPrice(n, { from: tickerCurrency(ticker) })
+  const [alerts, setAlerts]           = useState([])
+  const [notifs, setNotifs]           = useState([])
+  const [loadingAlerts, setLoadingAlerts]   = useState(true)
+  const [loadingNotifs, setLoadingNotifs]   = useState(true)
+  const [showAllNotifs, setShowAllNotifs]   = useState(false)
+
+  // Create form
+  const [ticker, setTicker]           = useState('')
+  const [condition, setCondition]     = useState('ABOVE')
+  const [targetPrice, setTargetPrice] = useState('')
+  const [creating, setCreating]       = useState(false)
+  const [createError, setCreateError] = useState(null)
+
+  const [deleting, setDeleting]       = useState(null)
+  const [marking, setMarking]         = useState(false)
+  const [toast, setToast]             = useState(null)
+
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 2500)
+  }
+
+  const fetchAlerts = useCallback(async () => {
+    setLoadingAlerts(true)
+    try {
+      const { data } = await alertsAPI.list()
+      setAlerts(data)
+    } catch (_) {}
+    finally { setLoadingAlerts(false) }
+  }, [])
+
+  const fetchNotifs = useCallback(async (unreadOnly = !showAllNotifs) => {
+    setLoadingNotifs(true)
+    try {
+      const { data } = await alertsAPI.notifications(!unreadOnly)
+      setNotifs(data)
+    } catch (_) {}
+    finally { setLoadingNotifs(false) }
+  }, [showAllNotifs])
+
+  useEffect(() => { fetchAlerts() }, [fetchAlerts])
+  useEffect(() => { fetchNotifs() }, [fetchNotifs])
+
+  const handleCreate = async (e) => {
+    e.preventDefault()
+    setCreateError(null)
+    const price = parseFloat(targetPrice)
+    if (!ticker.trim() || isNaN(price) || price <= 0) {
+      setCreateError('Fill in all fields correctly')
+      return
+    }
+    setCreating(true)
+    try {
+      const { data } = await alertsAPI.create(ticker.trim().toUpperCase(), condition, price)
+      setAlerts((prev) => [data, ...prev])
+      setTicker('')
+      setTargetPrice('')
+      showToast('Alert created')
+    } catch (err) {
+      setCreateError(err.response?.data?.error || 'Failed to create alert')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleDelete = async (alert_id) => {
+    setDeleting(alert_id)
+    try {
+      await alertsAPI.delete(alert_id)
+      setAlerts((prev) => prev.filter((a) => a.alert_id !== alert_id))
+      showToast('Alert deleted')
+    } catch (_) {}
+    finally { setDeleting(null) }
+  }
+
+  const handleMarkRead = async (ids) => {
+    setMarking(true)
+    try {
+      await alertsAPI.markRead(ids)
+      setNotifs((prev) =>
+        prev.map((n) => ids.includes(n.notif_id) ? { ...n, is_read: true } : n),
+      )
+    } catch (_) {}
+    finally { setMarking(false) }
+  }
+
+  const handleMarkAllRead = () => {
+    const unread = notifs.filter((n) => !n.is_read).map((n) => n.notif_id)
+    if (unread.length) handleMarkRead(unread)
+  }
+
+  const unreadCount = notifs.filter((n) => !n.is_read).length
+
+  return (
+    <div className="page-layout">
+      <Header title="Alerts" />
+      <main className="page-content">
+
+        {/* ── Create alert ── */}
+        <section className="card">
+          <h2 className="card-title" style={{ marginBottom: 14 }}>
+            <Bell size={15} style={{ marginRight: 6 }} />
+            Create Price Alert
+          </h2>
+          <form className="alert-form" onSubmit={handleCreate}>
+            <input
+              className="form-input"
+              placeholder="Ticker (e.g. AAPL)"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value.toUpperCase())}
+              maxLength={15}
+            />
+            <div className="condition-toggle">
+              {['ABOVE', 'BELOW'].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`period-btn ${condition === c ? 'active' : ''}`}
+                  onClick={() => setCondition(c)}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+            <input
+              className="form-input"
+              type="number"
+              placeholder="Target price"
+              min="0"
+              step="any"
+              value={targetPrice}
+              onChange={(e) => setTargetPrice(e.target.value)}
+            />
+            <button className="btn btn-primary" type="submit" disabled={creating}>
+              {creating ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}
+              Set Alert
+            </button>
+          </form>
+          {createError && (
+            <p className="form-error" style={{ marginTop: '0.5rem' }}>{createError}</p>
+          )}
+        </section>
+
+        {/* ── Active alerts ── */}
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h2 className="card-title">Active Alerts</h2>
+              <p className="card-sub">{alerts.filter((a) => a.is_active).length} active</p>
+            </div>
+          </div>
+
+          {loadingAlerts ? (
+            <div style={{ padding: '40px', textAlign: 'center' }}>
+              <Loader2 size={20} className="spin" style={{ color: 'var(--text-muted)' }} />
+            </div>
+          ) : alerts.length === 0 ? (
+            <div className="empty-state">
+              <BellOff size={36} opacity={0.3} />
+              <p>No alerts set. Create one above.</p>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Condition</th>
+                    <th>Target</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alerts.map((a) => (
+                    <tr key={a.alert_id}>
+                      <td><span className="ticker-badge">{a.ticker}</span></td>
+                      <td>
+                        <span
+                          className={`type-badge ${a.condition === 'ABOVE' ? 'pos' : 'neg'}`}
+                        >
+                          {a.condition}
+                        </span>
+                      </td>
+                      <td className="fw-medium">{fmt(a.target_price, a.ticker)}</td>
+                      <td>
+                        <span className={`status-pill ${a.is_active ? 'status-open' : 'status-filled'}`}>
+                          {a.is_active ? 'Active' : 'Triggered'}
+                        </span>
+                      </td>
+                      <td className="text-muted">
+                        {a.created_at ? new Date(a.created_at).toLocaleDateString() : '—'}
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-sm btn-ghost btn-danger"
+                          onClick={() => handleDelete(a.alert_id)}
+                          disabled={deleting === a.alert_id}
+                          title="Delete alert"
+                        >
+                          {deleting === a.alert_id
+                            ? <Loader2 size={13} className="spin" />
+                            : <Trash2 size={13} />}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* ── Notifications ── */}
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h2 className="card-title">
+                <Bell size={15} style={{ marginRight: 6 }} />
+                Notifications
+                {unreadCount > 0 && (
+                  <span className="notif-count-badge">{unreadCount} unread</span>
+                )}
+              </h2>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                className="btn btn-sm btn-outline"
+                onClick={() => setShowAllNotifs((v) => !v)}
+              >
+                {showAllNotifs ? 'Show unread' : 'Show all'}
+              </button>
+              {unreadCount > 0 && (
+                <button
+                  className="btn btn-sm btn-outline"
+                  onClick={handleMarkAllRead}
+                  disabled={marking}
+                >
+                  <CheckCheck size={13} /> Mark all read
+                </button>
+              )}
+            </div>
+          </div>
+
+          {loadingNotifs ? (
+            <div style={{ padding: '40px', textAlign: 'center' }}>
+              <Loader2 size={20} className="spin" style={{ color: 'var(--text-muted)' }} />
+            </div>
+          ) : notifs.length === 0 ? (
+            <div className="empty-state">
+              <Bell size={36} opacity={0.3} />
+              <p>{showAllNotifs ? 'No notifications.' : 'No unread notifications.'}</p>
+            </div>
+          ) : (
+            <ul className="notif-list">
+              {notifs.map((n) => (
+                <li key={n.notif_id} className={`notif-item ${n.is_read ? 'read' : 'unread'}`}>
+                  <div className="notif-dot" />
+                  <div className="notif-content">
+                    <p className="notif-message">{n.message}</p>
+                    <span className="notif-time text-muted">
+                      {n.created_at ? new Date(n.created_at).toLocaleString() : ''}
+                    </span>
+                  </div>
+                  {!n.is_read && (
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => handleMarkRead([n.notif_id])}
+                      title="Mark as read"
+                    >
+                      <CheckCheck size={13} />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </main>
+
+      {toast && <div className="toast success">{toast}</div>}
+    </div>
+  )
+}

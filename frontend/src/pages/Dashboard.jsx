@@ -12,6 +12,7 @@ import Header from '../components/Header'
 import { SkeletonCard, SkeletonTable, SkeletonChart } from '../components/LoadingSkeleton'
 import { portfolioAPI } from '../services/api'
 import { useAuth } from '../context/AuthContext'
+import { useRegion, tickerCurrency } from '../context/RegionContext'
 
 function StatCard({ label, value, sub, positive, icon: Icon }) {
   return (
@@ -30,7 +31,7 @@ function StatCard({ label, value, sub, positive, icon: Icon }) {
   )
 }
 
-function PortfolioChart({ snapshots, loading }) {
+function PortfolioChart({ snapshots, loading, formatCurrency, region }) {
   if (loading) return <SkeletonChart />
   if (!snapshots?.length) return (
     <div className="chart-empty" style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -61,12 +62,12 @@ function PortfolioChart({ snapshots, loading }) {
           interval="preserveStartEnd"
         />
         <YAxis
-          tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+          tickFormatter={(v) => `${region.symbol}${(v / 1000).toFixed(0)}k`}
           tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
-          tickLine={false} axisLine={false} width={55}
+          tickLine={false} axisLine={false} width={60}
         />
         <Tooltip
-          formatter={(v) => [`$${v.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 'Portfolio Value']}
+          formatter={(v) => [formatCurrency(v), 'Portfolio Value']}
           labelFormatter={(l) => new Date(l).toLocaleDateString()}
           contentStyle={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 6 }}
         />
@@ -79,6 +80,7 @@ function PortfolioChart({ snapshots, loading }) {
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const { formatCurrency, formatPrice, region } = useRegion()
   const navigate = useNavigate()
 
   const [portfolio, setPortfolio]   = useState(null)
@@ -113,10 +115,8 @@ export default function Dashboard() {
     fetchSnapshots()
   }, [fetchPortfolio, fetchSnapshots])
 
-  const fmt = (n) =>
-    n != null
-      ? `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      : '—'
+  const fmt  = (n) => formatCurrency(n)              // account values (balance, totals)
+  const fmtp = (n, ticker) => formatPrice(n, { from: tickerCurrency(ticker) })
 
   return (
     <div className="page-layout">
@@ -168,7 +168,7 @@ export default function Dashboard() {
               <RefreshCw size={15} />
             </button>
           </div>
-          <PortfolioChart snapshots={snapshots} loading={snapLoading} />
+          <PortfolioChart snapshots={snapshots} loading={snapLoading} formatCurrency={formatCurrency} region={region} />
         </section>
 
         {/* Holdings table */}
@@ -211,13 +211,13 @@ export default function Dashboard() {
                         </div>
                       </td>
                       <td>{h.quantity}</td>
-                      <td>{fmt(h.avg_buy_price)}</td>
-                      <td>{h.current_price != null ? fmt(h.current_price) : '—'}</td>
-                      <td>{h.market_value != null ? fmt(h.market_value) : '—'}</td>
+                      <td>{fmtp(h.avg_buy_price, h.ticker)}</td>
+                      <td>{fmtp(h.current_price, h.ticker)}</td>
+                      <td>{fmtp(h.market_value,  h.ticker)}</td>
                       <td>
                         {h.pl != null ? (
                           <span className={h.pl >= 0 ? 'pos' : 'neg'}>
-                            {h.pl >= 0 ? '+' : ''}{fmt(h.pl)}
+                            {h.pl >= 0 ? '+' : ''}{fmtp(h.pl, h.ticker)}
                             <small> ({h.pl_pct >= 0 ? '+' : ''}{h.pl_pct?.toFixed(2)}%)</small>
                           </span>
                         ) : '—'}

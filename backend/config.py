@@ -32,3 +32,7 @@ class Config:
 
     # ── Misc ───────────────────────────────────────────────
     STARTING_BALANCE = 1_000_000.00
+
+    # ── Price cache ────────────────────────────────────────
+    PRICE_REFRESH_INTERVAL = int(os.environ.get("PRICE_REFRESH_INTERVAL", 300))
+    PRICE_STALE_SECONDS    = int(os.environ.get("PRICE_STALE_SECONDS",    600))

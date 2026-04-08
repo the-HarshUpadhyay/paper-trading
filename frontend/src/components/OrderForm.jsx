@@ -1,39 +1,84 @@
 import { useState } from 'react'
-import { X, TrendingUp, TrendingDown, Loader2 } from 'lucide-react'
-import { tradingAPI } from '../services/api'
+import { tradingAPI, pendingOrdersAPI } from '../services/api'
 import { useAuth } from '../context/AuthContext'
+import { useRegion, tickerCurrency } from '../context/RegionContext'
 
 /**
- * OrderForm — modal for buying/selling a stock.
+ * OrderForm — Zerodha-style buy/sell console.
  * Props:
  *   ticker       string
  *   price        number  (current market price)
+ *   initialSide  'buy' | 'sell'  (default 'buy')
  *   onClose      fn()
  *   onSuccess    fn(result)
  */
-export default function OrderForm({ ticker, price, onClose, onSuccess }) {
-  const { refreshUser } = useAuth()
-  const [tab, setTab]         = useState('buy')   // 'buy' | 'sell'
-  const [quantity, setQty]    = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState(null)
 
-  const qty   = parseFloat(quantity) || 0
-  const total = qty * (price || 0)
+const PRODUCT_TYPES = [
+  { id: 'MIS', label: 'MIS' },
+  { id: 'CNC', label: 'CNC' },
+]
+
+const ORDER_TYPES = [
+  { id: 'MARKET',     label: 'MARKET' },
+  { id: 'LIMIT',      label: 'LIMIT'  },
+  { id: 'STOP_LIMIT', label: 'SL'     },
+  { id: 'STOP',       label: 'SL-M'   },
+]
+
+export default function OrderForm({ ticker, price, initialSide = 'buy', onClose, onSuccess }) {
+  const { refreshUser }          = useAuth()
+  const { formatPrice }          = useRegion()
+  const priceCurr                = tickerCurrency(ticker)
+  const fp = (n) => n != null ? formatPrice(n, { from: priceCurr }) : '—'
+
+  const [side, setSide]             = useState(initialSide)
+  const [productType, setProduct]   = useState('CNC')
+  const [orderType, setOrderType]   = useState('MARKET')
+  const [quantity, setQty]          = useState('')
+  const [limitPrice, setLimit]      = useState('')
+  const [stopPrice, setStop]        = useState('')
+  const [disclosedQty, setDisclosed]= useState('0')
+  const [showMore, setShowMore]     = useState(false)
+  const [expiresAt, setExpiry]      = useState('')
+  const [loading, setLoading]       = useState(false)
+  const [error, setError]           = useState(null)
+
+  const qty       = parseFloat(quantity) || 0
+  const isBuy     = side === 'buy'
+  const isMarket  = orderType === 'MARKET'
+  const isStop    = orderType === 'STOP'       // SL-M: trigger only
+  const isSL      = orderType === 'STOP_LIMIT' // SL:   trigger + limit
+  const priceDisabled  = isMarket || isStop
+  const triggerEnabled = isStop || isSL
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (qty <= 0) { setError('Quantity must be positive'); return }
-    if (!price)   { setError('Price unavailable — try again'); return }
 
     setLoading(true)
     setError(null)
     try {
-      const fn   = tab === 'buy' ? tradingAPI.buy : tradingAPI.sell
-      const { data } = await fn(ticker, qty, price)
-      await refreshUser()
-      onSuccess?.(data)
-      onClose?.()
+      if (isMarket) {
+        if (!price) { setError('Price unavailable — try again'); setLoading(false); return }
+        const fn       = isBuy ? tradingAPI.buy : tradingAPI.sell
+        const { data } = await fn(ticker, qty, price)
+        await refreshUser()
+        onSuccess?.(data)
+        onClose?.()
+      } else {
+        const payload = {
+          ticker:     ticker.toUpperCase(),
+          side:       side.toUpperCase(),
+          order_type: orderType,
+          quantity:   qty,
+        }
+        if ((isSL || orderType === 'LIMIT') && limitPrice) payload.limit_price = parseFloat(limitPrice)
+        if (triggerEnabled && stopPrice)                    payload.stop_price  = parseFloat(stopPrice)
+        if (expiresAt)                                      payload.expires_at  = expiresAt
+        await pendingOrdersAPI.place(payload)
+        onSuccess?.({ message: `${ORDER_TYPES.find(t => t.id === orderType)?.label} order placed` })
+        onClose?.()
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Order failed. Please try again.')
     } finally {
@@ -41,41 +86,63 @@ export default function OrderForm({ ticker, price, onClose, onSuccess }) {
     }
   }
 
+  const toggleSide = () => { setSide(s => s === 'buy' ? 'sell' : 'buy'); setError(null) }
+
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose?.()}>
-      <div className="modal-card order-form">
-        {/* Header */}
-        <div className="modal-header">
-          <span className="modal-ticker">{ticker}</span>
-          <span className="modal-price">${price?.toFixed(2) ?? '—'}</span>
-          <button className="modal-close" onClick={onClose}>
-            <X size={18} />
-          </button>
+      <form className="zk-card" onSubmit={handleSubmit} onClick={(e) => e.stopPropagation()}>
+
+        {/* ── Header ── */}
+        <div className={`zk-header ${side}`}>
+          <div className="zk-header-left">
+            <span className="zk-side-label">{isBuy ? 'Buy' : 'Sell'}</span>
+            <span className="zk-ticker-name">{ticker}</span>
+            <span className="zk-header-price">{fp(price)}</span>
+          </div>
+          <label className="zk-toggle-wrap" title="Switch Buy / Sell">
+            <input type="checkbox" checked={isBuy} onChange={toggleSide} />
+            <span className="zk-toggle-track">
+              <span className="zk-toggle-thumb" />
+            </span>
+          </label>
         </div>
 
-        {/* Tabs */}
-        <div className="order-tabs">
-          <button
-            className={`order-tab buy${tab === 'buy' ? ' active' : ''}`}
-            onClick={() => { setTab('buy'); setError(null) }}
-          >
-            <TrendingUp size={15} /> Buy
-          </button>
-          <button
-            className={`order-tab sell${tab === 'sell' ? ' active' : ''}`}
-            onClick={() => { setTab('sell'); setError(null) }}
-          >
-            <TrendingDown size={15} /> Sell
-          </button>
+        {/* ── Controls: product type + order type ── */}
+        <div className="zk-controls">
+          <div className="zk-radios">
+            {PRODUCT_TYPES.map(p => (
+              <label key={p.id} className={`zk-radio${productType === p.id ? ' active' : ''}`}>
+                <input
+                  type="radio"
+                  name="productType"
+                  checked={productType === p.id}
+                  onChange={() => setProduct(p.id)}
+                />
+                {p.label}
+              </label>
+            ))}
+          </div>
+          <div className="zk-radios zk-radios-right">
+            {ORDER_TYPES.map(t => (
+              <label key={t.id} className={`zk-radio${orderType === t.id ? ' active' : ''}`}>
+                <input
+                  type="radio"
+                  name="orderType"
+                  checked={orderType === t.id}
+                  onChange={() => { setOrderType(t.id); setError(null) }}
+                />
+                {t.label}
+              </label>
+            ))}
+          </div>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="order-body">
-          <label className="form-label">
-            Quantity
+        {/* ── Input grid ── */}
+        <div className="zk-inputs">
+          <div className="zk-field">
+            <label>Qty.</label>
             <input
               type="number"
-              className="form-input"
               min="0.0001"
               step="0.0001"
               value={quantity}
@@ -83,33 +150,84 @@ export default function OrderForm({ ticker, price, onClose, onSuccess }) {
               placeholder="0"
               autoFocus
             />
-          </label>
-
-          <div className="order-summary">
-            <span className="summary-label">Price per share</span>
-            <span className="summary-value">${price?.toFixed(2) ?? '—'}</span>
           </div>
-          <div className="order-summary total">
-            <span className="summary-label">Estimated total</span>
-            <span className="summary-value">
-              {qty > 0 ? `$${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
-            </span>
+          <div className="zk-field">
+            <label>Price</label>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={priceDisabled ? '0' : limitPrice}
+              onChange={(e) => setLimit(e.target.value)}
+              disabled={priceDisabled}
+              placeholder="0"
+            />
           </div>
+          <div className="zk-field">
+            <label>Trigger price</label>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={triggerEnabled ? stopPrice : '0'}
+              onChange={(e) => setStop(e.target.value)}
+              disabled={!triggerEnabled}
+              placeholder="0"
+            />
+          </div>
+          <div className="zk-field">
+            <label>Disclosed qty.</label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={disclosedQty}
+              onChange={(e) => setDisclosed(e.target.value)}
+              placeholder="0"
+            />
+          </div>
+        </div>
 
-          {error && <p className="form-error">{error}</p>}
+        {/* ── More options (expander) ── */}
+        {showMore && (
+          <div className="zk-more-body">
+            <div className="zk-field zk-field-wide">
+              <label>Expires At <span className="zk-optional">(optional)</span></label>
+              <input
+                type="datetime-local"
+                value={expiresAt}
+                onChange={(e) => setExpiry(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
 
+        {error && <p className="zk-error">{error}</p>}
+
+        {/* ── Footer ── */}
+        <div className="zk-footer">
           <button
-            type="submit"
-            className={`order-submit ${tab}`}
-            disabled={loading || qty <= 0}
+            type="button"
+            className="zk-more-btn"
+            onClick={() => setShowMore(v => !v)}
           >
-            {loading
-              ? <Loader2 size={16} className="spin" />
-              : `${tab === 'buy' ? 'Buy' : 'Sell'} ${ticker}`
-            }
+            {showMore ? 'Hide options' : 'More options'}
           </button>
-        </form>
-      </div>
+          <div className="zk-footer-actions">
+            <button
+              type="submit"
+              className={`zk-btn-submit ${side}`}
+              disabled={loading || qty <= 0}
+            >
+              {loading ? '...' : isBuy ? 'Buy' : 'Sell'}
+            </button>
+            <button type="button" className="zk-btn-cancel" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </div>
+
+      </form>
     </div>
   )
 }

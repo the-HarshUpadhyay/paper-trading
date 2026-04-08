@@ -6,6 +6,7 @@ import oracledb
 
 from db.connection import get_connection
 from services.portfolio_service import PortfolioService
+from utils import scalar_out
 
 
 class TradingService:
@@ -20,7 +21,7 @@ class TradingService:
                 "pkg_trading.execute_buy",
                 [user_id, ticker, quantity, price, trans_id_var]
             )
-            trans_id = int(trans_id_var.getvalue())
+            trans_id = scalar_out(trans_id_var)
             conn.commit()
 
             # Async snapshot save (best-effort)
@@ -63,7 +64,7 @@ class TradingService:
                 "pkg_trading.execute_sell",
                 [user_id, ticker, quantity, price, trans_id_var]
             )
-            trans_id = int(trans_id_var.getvalue())
+            trans_id = scalar_out(trans_id_var)
             conn.commit()
 
             try:

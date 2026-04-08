@@ -21,12 +21,7 @@ import pandas as pd
 import yfinance as yf
 
 from db.connection import DBCursor
-from services.market_data import (
-    get_full_quote,
-    get_batch_prices,
-    refresh_quote,
-    sanitize_stock_data,
-)
+from services.market_data import get_full_quote, get_batch_prices
 
 logger = logging.getLogger(__name__)
 
@@ -89,37 +84,38 @@ class StockService:
                 r["price"]      = data.get("price",      0.0)
                 r["change_pct"] = data.get("change_pct", 0.0)
 
-        # ── Step 3: Unknown ticker — yfinance fallback ─────────────────────
+        # ── Step 3: Unknown ticker — cache-first fallback ──────────────────
         # Only reached when the DB has no matching rows (e.g., first-time search).
+        # Uses get_full_quote() which checks in-memory cache before hitting yfinance.
         if not results and len(query) <= 15:
             base = query.upper().rstrip(".")
             for try_ticker in [base, f"{base}.NS", f"{base}.BO"]:
                 try:
-                    info = yf.Ticker(try_ticker).info
-                    # Guard against None or empty info dicts
-                    if not info or not isinstance(info, dict) or not info.get("symbol"):
+                    data = get_full_quote(try_ticker)
+                    # sanitize_stock_data(None) returns defaults with no "ticker" key;
+                    # a real ticker always has its symbol populated.
+                    if not data or not data.get("ticker"):
+                        continue
+                    if not data.get("price"):
                         continue
 
-                    symbol = str(info["symbol"])
-                    price  = info.get("currentPrice") or info.get("regularMarketPrice") or 0.0
                     results.append({
-                        "ticker":       symbol,
-                        "company_name": str(info.get("longName") or info.get("shortName") or symbol),
-                        "sector":       str(info.get("sector")   or ""),
-                        "exchange":     str(info.get("exchange") or ""),
-                        "price":        float(price) if price else 0.0,
-                        "change_pct":   0.0,
+                        "ticker":       data["ticker"],
+                        "company_name": data.get("company_name", data["ticker"]),
+                        "sector":       data.get("sector",   ""),
+                        "exchange":     data.get("exchange", ""),
+                        "price":        data.get("price",      0.0),
+                        "change_pct":   data.get("change_pct", 0.0),
                     })
-                    # Persist to DB catalogue so next search is instant
                     self._upsert_stock(
-                        results[-1]["ticker"],
-                        results[-1]["company_name"],
-                        results[-1]["sector"],
-                        results[-1]["exchange"],
+                        data["ticker"],
+                        data.get("company_name", data["ticker"]),
+                        data.get("sector",   ""),
+                        data.get("exchange", ""),
                     )
                     break
                 except Exception as e:
-                    logger.debug("yfinance fallback for %s failed: %s", try_ticker, e)
+                    logger.debug("Fallback quote failed for %s: %s", try_ticker, e)
 
         return results
 
@@ -181,23 +177,35 @@ class StockService:
                 return {"error": f"No history data for '{ticker}'"}, 404
 
             df = df.dropna()
-            # Remove timezone info so timestamps serialise cleanly to ISO-8601
-            if hasattr(df.index, "tz_localize"):
+            # Remove timezone info so timestamps serialise cleanly to ISO-8601.
+            # tz-naive index → tz_localize(None) is a no-op (safe).
+            # tz-aware index → tz_localize raises TypeError; use tz_convert instead.
+            try:
                 df.index = df.index.tz_localize(None)
+            except TypeError:
+                df.index = df.index.tz_convert(None)
 
             # Flatten MultiIndex columns if yfinance returns them
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
 
+            def _sf(val, default=0.0):
+                """Safely extract a scalar float from a possibly-Series cell."""
+                try:
+                    v = float(val)
+                    return v if not pd.isna(v) else default
+                except (TypeError, ValueError):
+                    return default
+
             records = []
             for ts, row in df.iterrows():
                 records.append({
                     "time":   ts.isoformat(),
-                    "open":   round(float(row.get("Open",  0) or 0), 4),
-                    "high":   round(float(row.get("High",  0) or 0), 4),
-                    "low":    round(float(row.get("Low",   0) or 0), 4),
-                    "close":  round(float(row.get("Close", 0) or 0), 4),
-                    "volume": int(row["Volume"]) if "Volume" in row and row["Volume"] else 0,
+                    "open":   round(_sf(row.get("Open")),   4),
+                    "high":   round(_sf(row.get("High")),   4),
+                    "low":    round(_sf(row.get("Low")),    4),
+                    "close":  round(_sf(row.get("Close")),  4),
+                    "volume": int(_sf(row.get("Volume", 0))),
                 })
 
             return {"ticker": ticker, "period": period, "interval": interval, "data": records}, 200

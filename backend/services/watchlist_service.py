@@ -17,6 +17,7 @@ import yfinance as yf
 
 from db.connection import DBCursor
 from services.market_data import get_batch_prices
+from utils import scalar_out
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,12 @@ class WatchlistService:
             with DBCursor() as cur:
                 cur.execute(
                     """SELECT s.ticker, s.company_name, s.sector, s.exchange,
-                              w.watchlist_id, w.added_at
+                              w.watchlist_id, w.added_at,
+                              w.folder_id,
+                              NVL(f.name, 'Uncategorised') AS folder_name
                          FROM watchlist w
                          JOIN stocks s ON s.stock_id = w.stock_id
+                         LEFT JOIN watchlist_folders f ON f.folder_id = w.folder_id
                         WHERE w.user_id = :1
                         ORDER BY w.added_at DESC""",
                     [user_id],
@@ -52,6 +56,8 @@ class WatchlistService:
                     "sector":       r[2] or "",
                     "exchange":     r[3] or "",
                     "added_at":     r[5].isoformat() if r[5] else None,
+                    "folder_id":    r[6],
+                    "folder_name":  r[7] or "Uncategorised",
                     "price":        0.0,
                     "change_pct":   0.0,
                 }
@@ -119,7 +125,7 @@ class WatchlistService:
                            RETURNING stock_id INTO :5""",
                         [ticker, company_name, sector, exchange, out_var],
                     )
-                    stock_id = out_var.getvalue()
+                    stock_id = scalar_out(out_var)
 
                 # Insert into watchlist
                 cur.execute(
@@ -156,6 +162,69 @@ class WatchlistService:
 
         except Exception as e:
             logger.error("watchlist.remove(user=%s, ticker=%s) failed: %s", user_id, ticker, e)
+            return {"error": str(e)}, 500
+
+    def create_folder(self, user_id: int, name: str):
+        try:
+            out_var = None
+            with DBCursor(auto_commit=True) as cur:
+                out_var = cur.var(oracledb.NUMBER)
+                cur.execute(
+                    """INSERT INTO watchlist_folders (user_id, name)
+                       VALUES (:1, :2)
+                       RETURNING folder_id INTO :3""",
+                    [user_id, name.strip(), out_var],
+                )
+            folder_id = scalar_out(out_var)
+            return {"folder_id": folder_id, "name": name.strip()}, 201
+        except oracledb.IntegrityError:
+            return {"error": f"Folder '{name}' already exists"}, 409
+        except Exception as e:
+            logger.error("watchlist.create_folder(user=%s): %s", user_id, e)
+            return {"error": str(e)}, 500
+
+    def rename_folder(self, user_id: int, folder_id: int, name: str):
+        try:
+            with DBCursor(auto_commit=True) as cur:
+                cur.execute(
+                    """UPDATE watchlist_folders SET name = :1
+                        WHERE folder_id = :2 AND user_id = :3""",
+                    [name.strip(), folder_id, user_id],
+                )
+                if cur.rowcount == 0:
+                    return {"error": "Folder not found"}, 404
+            return {"folder_id": folder_id, "name": name.strip()}, 200
+        except Exception as e:
+            logger.error("watchlist.rename_folder(user=%s): %s", user_id, e)
+            return {"error": str(e)}, 500
+
+    def delete_folder(self, user_id: int, folder_id: int):
+        try:
+            with DBCursor(auto_commit=True) as cur:
+                cur.execute(
+                    "DELETE FROM watchlist_folders WHERE folder_id = :1 AND user_id = :2",
+                    [folder_id, user_id],
+                )
+                if cur.rowcount == 0:
+                    return {"error": "Folder not found"}, 404
+            return {"message": "Folder deleted"}, 200
+        except Exception as e:
+            logger.error("watchlist.delete_folder(user=%s): %s", user_id, e)
+            return {"error": str(e)}, 500
+
+    def move_item(self, user_id: int, watchlist_id: int, folder_id):
+        try:
+            with DBCursor(auto_commit=True) as cur:
+                cur.execute(
+                    """UPDATE watchlist SET folder_id = :1
+                        WHERE watchlist_id = :2 AND user_id = :3""",
+                    [folder_id, watchlist_id, user_id],
+                )
+                if cur.rowcount == 0:
+                    return {"error": "Watchlist item not found"}, 404
+            return {"message": "Item moved"}, 200
+        except Exception as e:
+            logger.error("watchlist.move_item(user=%s): %s", user_id, e)
             return {"error": str(e)}, 500
 
     # ── Helpers ─────────────────────────────────────────────────────────────

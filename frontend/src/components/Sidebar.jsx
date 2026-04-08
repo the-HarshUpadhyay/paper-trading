@@ -1,18 +1,24 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, TrendingUp, Star, ClipboardList,
-  LogOut, Activity,
+  LayoutDashboard, Star, ClipboardList,
+  LogOut, Activity, Bell, FileText, Clock, BarChart2,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useRegion } from '../context/RegionContext'
 
 const NAV = [
-  { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard'  },
-  { to: '/watchlist',  icon: Star,             label: 'Watchlist'  },
-  { to: '/orders',     icon: ClipboardList,    label: 'Orders'     },
+  { to: '/dashboard',      icon: LayoutDashboard, label: 'Dashboard'      },
+  { to: '/watchlist',      icon: Star,             label: 'Watchlist'      },
+  { to: '/orders',         icon: ClipboardList,    label: 'Orders'         },
+  { to: '/pending-orders', icon: Clock,            label: 'Pending Orders' },
+  { to: '/alerts',         icon: Bell,             label: 'Alerts'         },
+  { to: '/notes',          icon: FileText,         label: 'Notes'          },
+  { to: '/analytics',      icon: BarChart2,        label: 'Analytics'      },
 ]
 
 export default function Sidebar() {
   const { user, logout } = useAuth()
+  const { formatCurrency } = useRegion()
   const navigate = useNavigate()
 
   const handleLogout = () => {
@@ -54,7 +60,7 @@ export default function Sidebar() {
             <div className="user-info">
               <span className="user-name">{user.username}</span>
               <span className="user-balance">
-                ${user.balance?.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                {formatCurrency(user.balance, { compact: true })}
               </span>
             </div>
           </div>

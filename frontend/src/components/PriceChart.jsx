@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { stocksAPI } from '../services/api'
 import { SkeletonChart } from './LoadingSkeleton'
+import { useRegion, tickerCurrency } from '../context/RegionContext'
 
 const PERIODS = [
   { label: '1D',  value: '1d',  interval: '5m'  },
@@ -44,7 +45,7 @@ function CandlestickBar(props) {
   )
 }
 
-function CustomTooltip({ active, payload, label, chartType }) {
+function CustomTooltip({ active, payload, label, chartType, fp }) {
   if (!active || !payload?.length) return null
   const d = payload[0]?.payload
   return (
@@ -52,13 +53,13 @@ function CustomTooltip({ active, payload, label, chartType }) {
       <p className="tooltip-label">{label}</p>
       {chartType === 'candlestick' ? (
         <>
-          <p>O: <b>${d?.open?.toFixed(2)}</b></p>
-          <p>H: <b>${d?.high?.toFixed(2)}</b></p>
-          <p>L: <b>${d?.low?.toFixed(2)}</b></p>
-          <p>C: <b>${d?.close?.toFixed(2)}</b></p>
+          <p>O: <b>{fp(d?.open)}</b></p>
+          <p>H: <b>{fp(d?.high)}</b></p>
+          <p>L: <b>{fp(d?.low)}</b></p>
+          <p>C: <b>{fp(d?.close)}</b></p>
         </>
       ) : (
-        <p>Price: <b>${d?.close?.toFixed(2)}</b></p>
+        <p>Price: <b>{fp(d?.close)}</b></p>
       )}
       {d?.volume != null && (
         <p>Vol: <b>{(d.volume / 1e6).toFixed(2)}M</b></p>
@@ -68,6 +69,10 @@ function CustomTooltip({ active, payload, label, chartType }) {
 }
 
 export default function PriceChart({ ticker }) {
+  const { formatPrice, region } = useRegion()
+  const priceCurr = tickerCurrency(ticker)
+  const fp = (n) => n != null ? formatPrice(n, { from: priceCurr }) : '—'
+
   const [data, setData]       = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
@@ -82,7 +87,6 @@ export default function PriceChart({ ticker }) {
       .then(({ data: res }) => {
         const formatted = (res.data || []).map((d) => ({
           ...d,
-          // Format time label based on period
           label: period.value === '1d' || period.value === '5d'
             ? new Date(d.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             : new Date(d.time).toLocaleDateString([], { month: 'short', day: 'numeric' }),
@@ -145,7 +149,7 @@ export default function PriceChart({ ticker }) {
           <YAxis
             yAxisId="price"
             domain={[minPrice, maxPrice]}
-            tickFormatter={(v) => `$${v.toFixed(0)}`}
+            tickFormatter={(v) => `${region.symbol}${v.toFixed(0)}`}
             tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
             tickLine={false}
             axisLine={false}
@@ -160,7 +164,7 @@ export default function PriceChart({ ticker }) {
             axisLine={false}
             width={50}
           />
-          <Tooltip content={<CustomTooltip chartType={chartType} />} />
+          <Tooltip content={<CustomTooltip chartType={chartType} fp={fp} />} />
 
           {/* Volume bars */}
           <Bar

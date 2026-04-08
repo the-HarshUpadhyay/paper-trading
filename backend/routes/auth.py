@@ -2,7 +2,8 @@
 routes/auth.py — /register  /login  /me  /logout
 """
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity, create_access_token
+from flask_jwt_extended import jwt_required, create_access_token
+from utils import get_uid
 
 from services.auth_service import AuthService
 
@@ -42,7 +43,7 @@ def login():
 @auth_bp.route("/me", methods=["GET"])
 @jwt_required()
 def me():
-    user_id = int(get_jwt_identity())
+    user_id = get_uid()
     result, status = _svc.get_profile(user_id)
     return jsonify(result), status
 

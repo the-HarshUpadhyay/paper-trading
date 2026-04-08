@@ -2,7 +2,8 @@
 routes/trading.py — /buy  /sell  /orders
 """
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
+from utils import get_uid
 
 from services.trading_service import TradingService
 
@@ -13,7 +14,7 @@ _svc = TradingService()
 @trading_bp.route("/buy", methods=["POST"])
 @jwt_required()
 def buy():
-    user_id = int(get_jwt_identity())
+    user_id = get_uid()
     data = request.get_json(silent=True) or {}
 
     ticker   = (data.get("ticker") or "").strip().upper()
@@ -37,7 +38,7 @@ def buy():
 @trading_bp.route("/sell", methods=["POST"])
 @jwt_required()
 def sell():
-    user_id = int(get_jwt_identity())
+    user_id = get_uid()
     data = request.get_json(silent=True) or {}
 
     ticker   = (data.get("ticker") or "").strip().upper()
@@ -61,7 +62,7 @@ def sell():
 @trading_bp.route("/orders", methods=["GET"])
 @jwt_required()
 def orders():
-    user_id = int(get_jwt_identity())
+    user_id = get_uid()
     page    = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 20))
     result, status = _svc.get_orders(user_id, page, per_page)

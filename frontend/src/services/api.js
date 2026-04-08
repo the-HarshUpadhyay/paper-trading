@@ -48,6 +48,11 @@ export const stocksAPI = {
   quote: (ticker) => api.get(`/stocks/${ticker}`),
   history: (ticker, period = '1mo', interval = '1d') =>
     api.get(`/stocks/${ticker}/history`, { params: { period, interval } }),
+  indexQuote: (ticker) => api.get(`/stocks/index/${ticker}`),
+}
+
+export const currencyAPI = {
+  rates: () => api.get('/currency/rates'),
 }
 
 // ── Trading ──────────────────────────────────────────────────────────────────
@@ -72,6 +77,38 @@ export const watchlistAPI = {
   get: () => api.get('/watchlist'),
   add: (ticker) => api.post('/watchlist', { ticker }),
   remove: (ticker) => api.delete(`/watchlist/${ticker}`),
+  createFolder: (name) => api.post('/watchlist/folders', { name }),
+  renameFolder: (id, name) => api.patch(`/watchlist/folders/${id}`, { name }),
+  deleteFolder: (id) => api.delete(`/watchlist/folders/${id}`),
+  moveItem: (watchlist_id, folder_id) =>
+    api.patch(`/watchlist/${watchlist_id}/folder`, { folder_id }),
+}
+
+// ── Notes ────────────────────────────────────────────────────────────────────
+export const notesAPI = {
+  list: (ticker) => api.get('/notes', { params: ticker ? { ticker } : {} }),
+  get: (id) => api.get(`/notes/${id}`),
+  create: (title, body, ticker) => api.post('/notes', { title, body, ticker }),
+  update: (id, title, body) => api.put(`/notes/${id}`, { title, body }),
+  delete: (id) => api.delete(`/notes/${id}`),
+}
+
+// ── Pending Orders ───────────────────────────────────────────────────────────
+export const pendingOrdersAPI = {
+  list: (status = 'OPEN') => api.get('/orders/pending', { params: { status } }),
+  place: (data) => api.post('/orders/pending', data),
+  cancel: (id) => api.delete(`/orders/pending/${id}`),
+}
+
+// ── Alerts & Notifications ───────────────────────────────────────────────────
+export const alertsAPI = {
+  list: () => api.get('/alerts'),
+  create: (ticker, condition, target_price) =>
+    api.post('/alerts', { ticker, condition, target_price }),
+  delete: (id) => api.delete(`/alerts/${id}`),
+  notifications: (unread_only = true) =>
+    api.get('/notifications', { params: { unread_only } }),
+  markRead: (ids) => api.post('/notifications/read', { ids }),
 }
 
 export default api

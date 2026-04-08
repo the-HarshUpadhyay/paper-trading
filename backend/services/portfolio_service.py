@@ -39,7 +39,7 @@ class PortfolioService:
             with DBCursor() as cur:
                 # 1. Holdings with stock metadata
                 cur.execute(
-                    """SELECT h.stock_id, s.ticker, s.company_name,
+                    """SELECT h.stock_id, s.ticker, s.company_name, s.sector,
                               h.quantity, h.avg_buy_price
                          FROM holdings h
                          JOIN stocks s ON s.stock_id = h.stock_id
@@ -77,7 +77,7 @@ class PortfolioService:
             total_invested = 0.0
             holdings_value = 0.0
 
-            for stock_id, ticker, company, qty, avg_cost in rows:
+            for stock_id, ticker, company, sector, qty, avg_cost in rows:
                 qty        = float(qty)
                 avg_cost   = float(avg_cost)
                 cost_basis = qty * avg_cost
@@ -95,6 +95,7 @@ class PortfolioService:
                     "stock_id":      stock_id,
                     "ticker":        ticker,
                     "company_name":  company,
+                    "sector":        sector or "",
                     "quantity":      qty,
                     "avg_buy_price": round(avg_cost, 4),
                     "current_price": round(cur_price, 4),

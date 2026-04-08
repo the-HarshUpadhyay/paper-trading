@@ -9,6 +9,7 @@ import PriceChart from '../components/PriceChart'
 import OrderForm from '../components/OrderForm'
 import { Skeleton } from '../components/LoadingSkeleton'
 import { stocksAPI, watchlistAPI } from '../services/api'
+import { useRegion, tickerCurrency } from '../context/RegionContext'
 
 function StatItem({ label, value }) {
   return (
@@ -19,17 +20,23 @@ function StatItem({ label, value }) {
   )
 }
 
-function fmtNum(n, prefix = '') {
-  if (n == null) return '—'
-  if (n >= 1e12) return `${prefix}${(n / 1e12).toFixed(2)}T`
-  if (n >= 1e9)  return `${prefix}${(n / 1e9).toFixed(2)}B`
-  if (n >= 1e6)  return `${prefix}${(n / 1e6).toFixed(2)}M`
-  return `${prefix}${Number(n).toLocaleString()}`
-}
-
 export default function StockDetail() {
   const { ticker }  = useParams()
   const navigate    = useNavigate()
+  const { formatPrice, region } = useRegion()
+
+  // Currency of this specific stock's prices — fixed, based on ticker suffix
+  const priceCurr = tickerCurrency(ticker)
+
+  // Format any price from this stock (converts from priceCurr → region.currency)
+  const fp = (n) => formatPrice(n, { from: priceCurr })
+
+  // Large number formatter (market cap, volume) — also converts
+  const fmtNum = (n) => {
+    if (n == null) return '—'
+    const converted = formatPrice(n, { from: priceCurr, compact: true })
+    return converted
+  }
 
   const [quote, setQuote]         = useState(null)
   const [loading, setLoading]     = useState(true)
@@ -126,7 +133,7 @@ export default function StockDetail() {
               <div className="stock-header-right">
                 <div className="stock-price-wrap">
                   <span className="stock-price">
-                    {price != null ? `$${price.toFixed(2)}` : '—'}
+                    {price != null ? fp(price) : '—'}
                   </span>
                   {changePct != null && (
                     <span className={`stock-change ${priceUp ? 'pos' : 'neg'}`}>
@@ -164,16 +171,16 @@ export default function StockDetail() {
             <section className="card">
               <h2 className="card-title">Key Statistics</h2>
               <div className="stats-grid-4">
-                <StatItem label="Open"        value={quote.open     != null ? `$${quote.open.toFixed(2)}`         : null} />
-                <StatItem label="Day High"    value={quote.day_high != null ? `$${quote.day_high.toFixed(2)}`     : null} />
-                <StatItem label="Day Low"     value={quote.day_low  != null ? `$${quote.day_low.toFixed(2)}`      : null} />
-                <StatItem label="Prev Close"  value={quote.previous_close != null ? `$${quote.previous_close.toFixed(2)}` : null} />
-                <StatItem label="Volume"      value={fmtNum(quote.volume)} />
-                <StatItem label="Avg Volume"  value={fmtNum(quote.avg_volume)} />
-                <StatItem label="Market Cap"  value={fmtNum(quote.market_cap, '$')} />
+                <StatItem label="Open"        value={fp(quote.open)} />
+                <StatItem label="Day High"    value={fp(quote.day_high)} />
+                <StatItem label="Day Low"     value={fp(quote.day_low)} />
+                <StatItem label="Prev Close"  value={fp(quote.previous_close)} />
+                <StatItem label="Volume"      value={quote.volume != null ? Number(quote.volume).toLocaleString() : '—'} />
+                <StatItem label="Avg Volume"  value={quote.avg_volume != null ? Number(quote.avg_volume).toLocaleString() : '—'} />
+                <StatItem label="Market Cap"  value={fmtNum(quote.market_cap)} />
                 <StatItem label="P/E Ratio"   value={quote.pe_ratio?.toFixed(2)} />
-                <StatItem label="52W High"    value={quote['52w_high'] != null ? `$${quote['52w_high'].toFixed(2)}` : null} />
-                <StatItem label="52W Low"     value={quote['52w_low']  != null ? `$${quote['52w_low'].toFixed(2)}`  : null} />
+                <StatItem label="52W High"    value={fp(quote['52w_high'])} />
+                <StatItem label="52W Low"     value={fp(quote['52w_low'])} />
               </div>
             </section>
 

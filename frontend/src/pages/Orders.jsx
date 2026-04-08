@@ -4,6 +4,7 @@ import { RefreshCw, ChevronLeft, ChevronRight, ArrowUpRight } from 'lucide-react
 import Header from '../components/Header'
 import { SkeletonTable } from '../components/LoadingSkeleton'
 import { tradingAPI } from '../services/api'
+import { useRegion, tickerCurrency } from '../context/RegionContext'
 
 const TYPE_COLOR = { BUY: 'pos', SELL: 'neg' }
 
@@ -35,8 +36,8 @@ export default function Orders() {
 
   useEffect(() => { fetchOrders(page) }, [page]) // eslint-disable-line
 
-  const fmt = (n) =>
-    `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const { formatPrice } = useRegion()
+  const fmt = (n, ticker) => formatPrice(n, { from: tickerCurrency(ticker) })
 
   const fmtDate = (iso) => {
     if (!iso) return '—'
@@ -100,8 +101,8 @@ export default function Orders() {
                           </div>
                         </td>
                         <td>{o.quantity}</td>
-                        <td>{fmt(o.price)}</td>
-                        <td className="fw-medium">{fmt(o.total_amount)}</td>
+                        <td>{fmt(o.price, o.ticker)}</td>
+                        <td className="fw-medium">{fmt(o.total_amount, o.ticker)}</td>
                         <td className="text-muted">{fmtDate(o.time)}</td>
                         <td>
                           <button

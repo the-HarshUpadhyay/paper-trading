@@ -121,8 +121,25 @@ class PriceScheduler:
         try:
             refresh_prices(self._active_tickers)
         except Exception as e:
-            # refresh_prices already swallows errors, but guard here too
             logger.error("Scheduler _tick error: %s", e)
+
+        try:
+            from services.cache import price_cache
+            from services.pending_order_service import check_and_fill_all
+            prices = {t: price_cache.get(t) for t in self._active_tickers}
+            check_and_fill_all(self._active_tickers, prices)
+        except Exception as e:
+            logger.error("Scheduler check_and_fill_all error: %s", e)
+
+        try:
+            from services.cache import price_cache
+            from services.alert_service import check_alerts
+            for ticker in self._active_tickers:
+                cached = price_cache.get(ticker)
+                if cached and cached.get("price"):
+                    check_alerts(ticker, cached["price"])
+        except Exception as e:
+            logger.error("Scheduler check_alerts error: %s", e)
 
     def _run_loop(self) -> None:
         """Main loop — runs until stop() sets the event."""

@@ -2,7 +2,8 @@
 routes/portfolio.py — /portfolio  /portfolio/snapshot
 """
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
+from utils import get_uid
 
 from services.portfolio_service import PortfolioService
 
@@ -13,7 +14,7 @@ _svc = PortfolioService()
 @portfolio_bp.route("/portfolio", methods=["GET"])
 @jwt_required()
 def get_portfolio():
-    user_id = int(get_jwt_identity())
+    user_id = get_uid()
     result, status = _svc.get_portfolio(user_id)
     return jsonify(result), status
 
@@ -21,7 +22,7 @@ def get_portfolio():
 @portfolio_bp.route("/portfolio/snapshots", methods=["GET"])
 @jwt_required()
 def get_snapshots():
-    user_id = int(get_jwt_identity())
+    user_id = get_uid()
     days    = int(request.args.get("days", 30))
     result, status = _svc.get_snapshots(user_id, days)
     return jsonify(result), status

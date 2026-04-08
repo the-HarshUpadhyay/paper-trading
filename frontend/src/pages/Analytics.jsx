@@ -1,0 +1,456 @@
+import { useState, useEffect, useCallback } from 'react'
+import {
+  ResponsiveContainer, AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip,
+  PieChart, Pie, Cell, Legend,
+  BarChart, Bar,
+} from 'recharts'
+import {
+  TrendingUp, TrendingDown, DollarSign,
+  PieChart as PieIcon, BarChart2, RefreshCw,
+} from 'lucide-react'
+import Header from '../components/Header'
+import { useRegion, tickerCurrency } from '../context/RegionContext'
+import { portfolioAPI } from '../services/api'
+
+// ── Palette for pie slices ──────────────────────────────────────
+const COLORS = [
+  '#387ed1', '#00b386', '#e8a020', '#e84040',
+  '#a855f7', '#06b6d4', '#f97316', '#84cc16',
+  '#ec4899', '#64748b',
+]
+
+// ── Helpers ─────────────────────────────────────────────────────
+const PERIOD_OPTIONS = [
+  { label: '7D',  days: 7  },
+  { label: '1M',  days: 30 },
+  { label: '3M',  days: 90 },
+  { label: '6M',  days: 180 },
+  { label: '1Y',  days: 365 },
+]
+
+function pct(n) {
+  return `${n >= 0 ? '+' : ''}${Number(n).toFixed(2)}%`
+}
+
+/* ── Stat card ─────────────────────────────────────────────────── */
+function StatCard({ label, value, sub, positive, icon: Icon }) {
+  return (
+    <div className="stat-card">
+      <div className="stat-header">
+        <span className="stat-label">{label}</span>
+        {Icon && <Icon size={16} className="stat-icon" />}
+      </div>
+      <div className={`stat-value ${positive === true ? 'pos' : positive === false ? 'neg' : ''}`}>
+        {value}
+      </div>
+      {sub != null && (
+        <div className={`stat-sub ${positive === true ? 'pos' : positive === false ? 'neg' : ''}`}>
+          {sub}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Custom tooltip for area chart ─────────────────────────────── */
+function AreaTooltip({ active, payload, label, formatCurrency }) {
+  if (!active || !payload?.length) return null
+  const d = payload[0].payload
+  return (
+    <div className="chart-tooltip">
+      <div className="tooltip-label">{new Date(label).toLocaleDateString()}</div>
+      <p>Total: <b>{formatCurrency(d.total_value)}</b></p>
+      <p>Holdings: <b>{formatCurrency(d.holdings_value)}</b></p>
+      <p>Cash: <b>{formatCurrency(d.cash_balance)}</b></p>
+    </div>
+  )
+}
+
+export default function Analytics() {
+  const { formatCurrency, formatPrice, toUSD, region } = useRegion()
+
+  const [portfolio,     setPortfolio]     = useState(null)
+  const [snapshots,     setSnapshots]     = useState([])
+  const [loading,       setLoading]       = useState(true)
+  const [snapLoading,   setSnapLoading]   = useState(true)
+  const [period,        setPeriod]        = useState(30)
+
+  const fetchPortfolio = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data } = await portfolioAPI.get()
+      setPortfolio(data)
+    } catch (_) {}
+    finally { setLoading(false) }
+  }, [])
+
+  const fetchSnapshots = useCallback(async (days = period) => {
+    setSnapLoading(true)
+    try {
+      const { data } = await portfolioAPI.snapshots(days)
+      setSnapshots(data.snapshots || [])
+    } catch (_) {}
+    finally { setSnapLoading(false) }
+  }, [period])
+
+  useEffect(() => { fetchPortfolio() }, [fetchPortfolio])
+  useEffect(() => { fetchSnapshots(period) }, [period])
+
+  // ── Derived data ─────────────────────────────────────────────
+
+  const holdings = portfolio?.holdings || []
+
+  // Helper: format a value tied to a specific ticker's native currency
+  const fmtH = (n, ticker) => formatPrice(n, { from: tickerCurrency(ticker) })
+
+  // Sector allocation — sum in USD then display in region currency
+  const sectorMap = {}
+  for (const h of holdings) {
+    const s = h.sector || 'Other'
+    const inUSD = toUSD(h.market_value || 0, tickerCurrency(h.ticker))
+    sectorMap[s] = (sectorMap[s] || 0) + inUSD
+  }
+  // Store as USD internally; formatPrice will convert to display currency
+  const sectorData = Object.entries(sectorMap)
+    .map(([name, value]) => ({ name, value: +value.toFixed(2), currency: 'USD' }))
+    .sort((a, b) => b.value - a.value)
+
+  // Cash vs holdings allocation (in USD for the pie)
+  const holdingsUSD = holdings.reduce((s, h) =>
+    s + toUSD(h.market_value || 0, tickerCurrency(h.ticker)), 0)
+  const cashUSD = toUSD(portfolio?.cash_balance || 0, 'INR')
+  const allocationData = portfolio ? [
+    { name: 'Holdings', value: +holdingsUSD.toFixed(2) },
+    { name: 'Cash',     value: +cashUSD.toFixed(2) },
+  ] : []
+
+  // Win / loss breakdown
+  const winners = holdings.filter((h) => h.pl > 0)
+  const losers  = holdings.filter((h) => h.pl < 0)
+  const flat    = holdings.filter((h) => h.pl === 0)
+
+  const totalPL    = holdings.reduce((s, h) => s + (h.pl || 0), 0)
+  const bestHolder = holdings.slice().sort((a, b) => (b.pl_pct || 0) - (a.pl_pct || 0))[0]
+  const worstHolder = holdings.slice().sort((a, b) => (a.pl_pct || 0) - (b.pl_pct || 0))[0]
+
+  // P/L per holding for bar chart (sorted by pl_pct)
+  const plBarData = holdings
+    .slice()
+    .sort((a, b) => (b.pl_pct || 0) - (a.pl_pct || 0))
+    .map((h) => ({
+      ticker: h.ticker,
+      pl_pct: +(h.pl_pct || 0).toFixed(2),
+      pl:     +(h.pl     || 0).toFixed(2),
+    }))
+
+  // Portfolio growth chart color
+  const firstSnap = snapshots[0]?.total_value
+  const lastSnap  = snapshots[snapshots.length - 1]?.total_value
+  const chartUp   = (lastSnap ?? 0) >= (firstSnap ?? 0)
+  const chartColor = chartUp ? '#00b386' : '#e84040'
+
+  const winRate = holdings.length
+    ? Math.round((winners.length / holdings.length) * 100)
+    : 0
+
+  return (
+    <div className="page-layout">
+      <Header title="Analytics" />
+
+      <main className="page-content">
+
+        {/* ── Summary stats ── */}
+        <section className="stats-grid">
+          <StatCard
+            label="Total Portfolio"
+            value={formatCurrency(portfolio?.total_value)}
+            icon={DollarSign}
+          />
+          <StatCard
+            label="Total P/L"
+            value={formatCurrency(portfolio?.total_pl)}
+            sub={pct(portfolio?.total_pl_pct ?? 0)}
+            positive={portfolio?.total_pl >= 0}
+            icon={portfolio?.total_pl >= 0 ? TrendingUp : TrendingDown}
+          />
+          <StatCard
+            label="Win Rate"
+            value={`${winRate}%`}
+            sub={`${winners.length}W · ${losers.length}L · ${flat.length} flat`}
+            positive={winRate >= 50 ? true : winRate < 40 ? false : undefined}
+            icon={BarChart2}
+          />
+          <StatCard
+            label="Holdings"
+            value={holdings.length}
+            sub={`${formatCurrency(portfolio?.holdings_value, { compact: true })} invested`}
+            icon={PieIcon}
+          />
+        </section>
+
+        {/* ── Portfolio growth chart ── */}
+        <section className="card chart-section">
+          <div className="card-header">
+            <div>
+              <h2 className="card-title">Portfolio Value Over Time</h2>
+              {snapshots.length > 0 && firstSnap && lastSnap && (
+                <p className={`card-sub ${chartUp ? 'pos' : 'neg'}`}>
+                  {chartUp ? '▲' : '▼'} {pct(((lastSnap - firstSnap) / firstSnap) * 100)} over period
+                </p>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div className="period-tabs">
+                {PERIOD_OPTIONS.map((p) => (
+                  <button
+                    key={p.days}
+                    className={`period-btn ${period === p.days ? 'active' : ''}`}
+                    onClick={() => setPeriod(p.days)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <button className="icon-btn" onClick={() => fetchSnapshots(period)} title="Refresh">
+                <RefreshCw size={14} />
+              </button>
+            </div>
+          </div>
+
+          {snapLoading ? (
+            <div className="chart-empty" style={{ height: 220 }}>
+              Loading chart…
+            </div>
+          ) : snapshots.length < 2 ? (
+            <div className="chart-empty" style={{ height: 220 }}>
+              Not enough data yet. Place trades to see your portfolio grow.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={snapshots} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={chartColor} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={chartColor} stopOpacity={0}   />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={(v) => new Date(v).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                  tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
+                  tickLine={false} axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tickFormatter={(v) => `${region.symbol}${(v / 1000).toFixed(0)}k`}
+                  tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
+                  tickLine={false} axisLine={false} width={55}
+                />
+                <Tooltip content={<AreaTooltip formatCurrency={formatCurrency} />} />
+                <Area
+                  type="monotone" dataKey="total_value"
+                  stroke={chartColor} strokeWidth={2}
+                  fill="url(#grad)" dot={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </section>
+
+        {/* ── Allocation charts row ── */}
+        {holdings.length > 0 && (
+          <div className="analytics-charts-row">
+
+            {/* Sector breakdown */}
+            <section className="card">
+              <h2 className="card-title" style={{ marginBottom: 16 }}>
+                <PieIcon size={15} style={{ marginRight: 6 }} />
+                Sector Allocation
+              </h2>
+              {sectorData.length === 0 ? (
+                <div className="empty-state" style={{ padding: '32px 0' }}>No holdings</div>
+              ) : (
+                <>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie
+                        data={sectorData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%" cy="50%"
+                        innerRadius={50} outerRadius={85}
+                        paddingAngle={2}
+                      >
+                        {sectorData.map((_, i) => (
+                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(v) => [formatPrice(v, { from: 'USD' }), 'Value']}
+                        contentStyle={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 6 }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <ul className="sector-legend">
+                    {sectorData.map((s, i) => {
+                      const total = sectorData.reduce((a, b) => a + b.value, 0)
+                      const share = total ? ((s.value / total) * 100).toFixed(1) : 0
+                      return (
+                        <li key={s.name} className="sector-legend-item">
+                          <span className="sector-dot" style={{ background: COLORS[i % COLORS.length] }} />
+                          <span className="sector-name">{s.name}</span>
+                          <span className="sector-share text-muted">{share}%</span>
+                          <span className="sector-value fw-medium">{formatPrice(s.value, { from: 'USD', compact: true })}</span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </>
+              )}
+            </section>
+
+            {/* Cash vs holdings */}
+            <section className="card">
+              <h2 className="card-title" style={{ marginBottom: 16 }}>
+                <DollarSign size={15} style={{ marginRight: 6 }} />
+                Portfolio Composition
+              </h2>
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie
+                    data={allocationData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%" cy="50%"
+                    innerRadius={50} outerRadius={85}
+                    paddingAngle={2}
+                  >
+                    <Cell fill="#387ed1" />
+                    <Cell fill="#00b386" />
+                  </Pie>
+                  <Tooltip
+                    formatter={(v) => [formatPrice(v, { from: 'USD' }), '']}
+                    contentStyle={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 6 }}
+                  />
+                  <Legend
+                    formatter={(v) => <span style={{ color: 'var(--text-sub)', fontSize: '0.82rem' }}>{v}</span>}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="composition-stats">
+                {allocationData.map((a) => (
+                  <div key={a.name} className="composition-stat">
+                    <span className="text-muted" style={{ fontSize: '0.78rem' }}>{a.name}</span>
+                    <span className="fw-medium">{formatPrice(a.value, { from: 'USD' })}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {/* ── P/L per holding bar chart ── */}
+        {plBarData.length > 0 && (
+          <section className="card">
+            <h2 className="card-title" style={{ marginBottom: 16 }}>
+              <BarChart2 size={15} style={{ marginRight: 6 }} />
+              P/L by Holding
+            </h2>
+            <ResponsiveContainer width="100%" height={Math.max(180, plBarData.length * 38)}>
+              <BarChart
+                data={plBarData}
+                layout="vertical"
+                margin={{ top: 0, right: 40, left: 10, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+                <XAxis
+                  type="number"
+                  tickFormatter={(v) => `${v >= 0 ? '+' : ''}${v}%`}
+                  tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
+                  tickLine={false} axisLine={false}
+                />
+                <YAxis
+                  type="category" dataKey="ticker"
+                  tick={{ fontSize: 12, fill: 'var(--text-sub)', fontWeight: 600 }}
+                  tickLine={false} axisLine={false} width={55}
+                />
+                <Tooltip
+                  formatter={(v, name, props) => [
+                    `${v >= 0 ? '+' : ''}${v}% (${fmtH(props.payload.pl, props.payload.ticker)})`,
+                    'P/L',
+                  ]}
+                  contentStyle={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 6 }}
+                />
+                <Bar dataKey="pl_pct" radius={[0, 3, 3, 0]}>
+                  {plBarData.map((d, i) => (
+                    <Cell key={i} fill={d.pl_pct >= 0 ? '#00b386' : '#e84040'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </section>
+        )}
+
+        {/* ── Top/Bottom performers ── */}
+        {holdings.length >= 2 && (
+          <div className="analytics-charts-row">
+            <section className="card">
+              <h2 className="card-title" style={{ marginBottom: 12 }}>
+                <TrendingUp size={15} style={{ marginRight: 6, color: 'var(--green)' }} />
+                Top Performer
+              </h2>
+              {bestHolder && (
+                <div className="performer-card">
+                  <span className="ticker-badge" style={{ fontSize: '1rem' }}>{bestHolder.ticker}</span>
+                  <div className="performer-info">
+                    <span className="performer-name">{bestHolder.company_name}</span>
+                    <span className="pos fw-medium" style={{ fontSize: '1.1rem' }}>
+                      {pct(bestHolder.pl_pct)}
+                    </span>
+                    <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+                      {fmtH(bestHolder.pl, bestHolder.ticker)} gain
+                    </span>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <section className="card">
+              <h2 className="card-title" style={{ marginBottom: 12 }}>
+                <TrendingDown size={15} style={{ marginRight: 6, color: 'var(--red)' }} />
+                Worst Performer
+              </h2>
+              {worstHolder && (
+                <div className="performer-card">
+                  <span className="ticker-badge" style={{ fontSize: '1rem' }}>{worstHolder.ticker}</span>
+                  <div className="performer-info">
+                    <span className="performer-name">{worstHolder.company_name}</span>
+                    <span className="neg fw-medium" style={{ fontSize: '1.1rem' }}>
+                      {pct(worstHolder.pl_pct)}
+                    </span>
+                    <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+                      {fmtH(Math.abs(worstHolder.pl), worstHolder.ticker)} loss
+                    </span>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        {/* ── Empty state ── */}
+        {!loading && holdings.length === 0 && (
+          <section className="card">
+            <div className="empty-state">
+              <BarChart2 size={40} opacity={0.3} />
+              <p>No holdings to analyze yet.<br />Place your first trade to see insights.</p>
+            </div>
+          </section>
+        )}
+
+      </main>
+    </div>
+  )
+}
