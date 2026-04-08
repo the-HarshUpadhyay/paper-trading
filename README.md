@@ -8,7 +8,7 @@ A production-quality paper trading platform built with **Oracle 21c XE**, **Pyth
 
 ### Core Trading
 - **Authentication** — Register/login with bcrypt-hashed passwords and JWT sessions
-- **Stock Search** — Debounced autocomplete with live prices from Yahoo Finance
+- **Stock Search** — Debounced autocomplete with live prices from Yahoo Finance; `TickerInput` component reused across Alerts, Watchlist, and Dashboard for consistent ticker entry
 - **Real-Time Quotes** — Open/High/Low/Close, % change, market cap, P/E ratio
 - **Paper Trading** — Buy and sell stocks; PL/SQL triggers enforce all business rules
 - **Portfolio Dashboard** — Live P&L, holdings table, portfolio growth chart
@@ -63,6 +63,9 @@ paper-trading/
 │
 ├── backend/
 │   ├── Dockerfile
+│   ├── entrypoint.sh          Docker container startup script
+│   ├── scripts/
+│   │   └── seed_demo.py       Seed demo user + sample portfolio data
 │   ├── app.py                 Flask application factory (v2: scheduler, migrations)
 │   ├── config.py              Configuration (env vars, starting balance = $1,000,000)
 │   ├── utils.py               Shared helpers (get_uid, scalar_out)
@@ -120,6 +123,7 @@ paper-trading/
         │   ├── Sidebar.jsx
         │   ├── Header.jsx             (notification bell + unread badge)
         │   ├── StockSearch.jsx
+        │   ├── TickerInput.jsx        ← NEW: autocomplete ticker search input
         │   ├── PriceChart.jsx
         │   ├── OrderForm.jsx
         │   └── LoadingSkeleton.jsx
