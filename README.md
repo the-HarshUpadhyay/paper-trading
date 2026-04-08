@@ -447,27 +447,17 @@ When using Docker Compose, `ORACLE_DSN` is automatically overridden to `db:1521/
 
 ### Backend
 
-1. **`list_notifications` uses `get_jwt_identity()` without import** — In `routes/alerts.py` line 49, `list_notifications` calls `int(get_jwt_identity())` directly instead of using the shared `get_uid()` helper. `get_jwt_identity` is not explicitly imported in that file. This will raise a `NameError` at runtime when the endpoint is called. **Fix:** replace with `user_id = get_uid()`.
+1. **`STARTING_BALANCE` mismatch** — `config.py` sets `STARTING_BALANCE = 1_000_000.00` but the README previously advertised $100,000. Ensure `04_sample_data.sql` and any seed `INSERT` statements use the same value, otherwise new accounts created via the UI and seeded demo accounts will have different balances.
 
-2. **`move_item` uses `get_jwt_identity()` without import** — Same issue in `routes/watchlist.py` line 79: `int(get_jwt_identity())` is called without importing it. Use `get_uid()` instead.
+2. **`alert_service.mark_read` SQL injection risk (low severity)** — The placeholders string is built via f-string with `len(notif_ids)`. Since the count, not the values, drives the f-string this is safe in practice, but the pattern is fragile. Prefer a fixed `IN (SELECT column_value FROM TABLE(:1))` binding.
 
-3. **`STARTING_BALANCE` mismatch** — `config.py` sets `STARTING_BALANCE = 1_000_000.00` but the README previously advertised $100,000. Ensure `04_sample_data.sql` and any seed `INSERT` statements use the same value, otherwise new accounts created via the UI and seeded demo accounts will have different balances.
+3. **Pending order `STOP_LIMIT` BUY logic** — In `pending_order_service.py`, a `STOP_LIMIT BUY` triggers when `current_price >= stop_p`, which is atypical (a buy stop-limit usually triggers above the stop and fills at the limit). Verify this matches the intended trading semantics.
 
-4. **FX rate fetch holds the lock during network I/O** — `fx_service.py` calls `yf.download()` while holding `_lock`. If the Yahoo Finance request is slow, all concurrent threads waiting for FX rates will block. Consider releasing the lock before fetching and using a double-checked locking pattern.
-
-5. **`alert_service.mark_read` SQL injection risk (low severity)** — The placeholders string is built via f-string with `len(notif_ids)`. Since the count, not the values, drives the f-string this is safe in practice, but the pattern is fragile. Prefer a fixed `IN (SELECT column_value FROM TABLE(:1))` binding.
-
-6. **Pending order `STOP_LIMIT` BUY logic** — In `pending_order_service.py`, a `STOP_LIMIT BUY` triggers when `current_price >= stop_p`, which is atypical (a buy stop-limit usually triggers above the stop and fills at the limit). Verify this matches the intended trading semantics.
-
-7. **`price_cache` singleton shared between Flask workers** — If the backend is later scaled with multiple processes (e.g. gunicorn `--workers N`), each worker will have its own in-memory cache, leading to stale/inconsistent prices across workers. For multi-process deployments, migrate the cache to Redis.
+4. **`price_cache` singleton shared between Flask workers** — If the backend is later scaled with multiple processes (e.g. gunicorn `--workers N`), each worker will have its own in-memory cache, leading to stale/inconsistent prices across workers. For multi-process deployments, migrate the cache to Redis.
 
 ### Frontend
 
-8. **`RegionContext` cash balance hardcoded to INR** — `Analytics.jsx` line 122 converts `cash_balance` with `toUSD(portfolio?.cash_balance || 0, 'INR')`. If the backend ever stores balances in a different currency, this will silently produce wrong numbers.
-
-9. **Error swallowing in `fetchPortfolio` / `fetchSnapshots`** — Both async functions catch all errors with an empty `catch (_) {}` block, so API failures are invisible to the user. Add user-facing error state.
-
-10. **`PriceScheduler` ticker list refreshes every 60 s** — Stocks added to a watchlist or bought within the last 60 s may not be refreshed until the next ticker-list reload. This is by design but can cause temporarily stale prices on newly added items.
+5. **`PriceScheduler` ticker list refreshes every 60 s** — Stocks added to a watchlist or bought within the last 60 s may not be refreshed until the next ticker-list reload. This is by design but can cause temporarily stale prices on newly added items.
 
 ---
 
@@ -478,7 +468,6 @@ When using Docker Compose, `ORACLE_DSN` is automatically overridden to `db:1521/
 - [ ] Run backend with `gunicorn` (Linux/macOS) or `waitress` (Windows) — **not** `python app.py`
 - [ ] Build frontend with `npm run build` and serve via Nginx or a static host
 - [ ] Enable HTTPS — update `CORS_ORIGINS` in `config.py` accordingly
-- [ ] Fix `get_jwt_identity()` import bug in `routes/alerts.py` and `routes/watchlist.py` before deploying
 - [ ] Consider rate-limiting `/api/stocks/*` endpoints (Yahoo Finance has informal limits)
 - [ ] For multi-process deployments, migrate `PriceCache` to Redis to share state across workers
 

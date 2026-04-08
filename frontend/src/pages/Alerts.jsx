@@ -43,7 +43,7 @@ export default function Alerts() {
   const fetchNotifs = useCallback(async (unreadOnly = !showAllNotifs) => {
     setLoadingNotifs(true)
     try {
-      const { data } = await alertsAPI.notifications(!unreadOnly)
+      const { data } = await alertsAPI.notifications(unreadOnly)
       setNotifs(data)
     } catch (_) {}
     finally { setLoadingNotifs(false) }

@@ -46,7 +46,7 @@ def delete_alert(alert_id: int):
 @alerts_bp.route("/notifications", methods=["GET"])
 @jwt_required()
 def list_notifications():
-    user_id    = int(get_jwt_identity())
+    user_id    = get_uid()
     unread_only = request.args.get("unread_only", "true").lower() != "false"
     result, status = _svc.list_notifications(user_id, unread_only)
     return jsonify(result), status

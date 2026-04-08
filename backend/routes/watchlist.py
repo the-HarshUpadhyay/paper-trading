@@ -76,7 +76,7 @@ def delete_folder(folder_id: int):
 @watchlist_bp.route("/watchlist/<int:watchlist_id>/folder", methods=["PATCH"])
 @jwt_required()
 def move_item(watchlist_id: int):
-    user_id   = int(get_jwt_identity())
+    user_id   = get_uid()
     data      = request.get_json(silent=True) or {}
     folder_id = data.get("folder_id")   # None = Uncategorised
     result, status = _svc.move_item(user_id, watchlist_id, folder_id)

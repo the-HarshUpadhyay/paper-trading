@@ -75,14 +75,17 @@ export default function Analytics() {
   const [loading,       setLoading]       = useState(true)
   const [snapLoading,   setSnapLoading]   = useState(true)
   const [period,        setPeriod]        = useState(30)
+  const [error,         setError]         = useState(null)
 
   const fetchPortfolio = useCallback(async () => {
     setLoading(true)
     try {
       const { data } = await portfolioAPI.get()
       setPortfolio(data)
-    } catch (_) {}
-    finally { setLoading(false) }
+      setError(null)
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Failed to load portfolio')
+    } finally { setLoading(false) }
   }, [])
 
   const fetchSnapshots = useCallback(async (days = period) => {
@@ -90,8 +93,9 @@ export default function Analytics() {
     try {
       const { data } = await portfolioAPI.snapshots(days)
       setSnapshots(data.snapshots || [])
-    } catch (_) {}
-    finally { setSnapLoading(false) }
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Failed to load snapshots')
+    } finally { setSnapLoading(false) }
   }, [period])
 
   useEffect(() => { fetchPortfolio() }, [fetchPortfolio])
@@ -119,7 +123,7 @@ export default function Analytics() {
   // Cash vs holdings allocation (in USD for the pie)
   const holdingsUSD = holdings.reduce((s, h) =>
     s + toUSD(h.market_value || 0, tickerCurrency(h.ticker)), 0)
-  const cashUSD = toUSD(portfolio?.cash_balance || 0, 'INR')
+  const cashUSD = toUSD(portfolio?.cash_balance || 0, 'USD')
   const allocationData = portfolio ? [
     { name: 'Holdings', value: +holdingsUSD.toFixed(2) },
     { name: 'Cash',     value: +cashUSD.toFixed(2) },
@@ -159,6 +163,10 @@ export default function Analytics() {
       <Header title="Analytics" />
 
       <main className="page-content">
+
+        {error && (
+          <div className="error-banner" role="alert">{error}</div>
+        )}
 
         {/* ── Summary stats ── */}
         <section className="stats-grid">

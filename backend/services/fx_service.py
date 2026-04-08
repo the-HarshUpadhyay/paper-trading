@@ -95,17 +95,25 @@ def get_rates() -> dict[str, float]:
     Return today's exchange rates relative to USD.
     Result format: {"USD": 1.0, "INR": 84.5, "GBP": 0.79, ...}
 
-    Thread-safe, cached per calendar day.
+    Thread-safe, cached per calendar day.  Uses double-checked locking so the
+    network fetch happens outside the lock, preventing all threads from blocking
+    on a slow yfinance request.
     """
     global _cache, _cache_date
 
     today = date.today()
+
+    # Fast path — no lock needed for a read when cache is already warm
     with _lock:
         if _cache is not None and _cache_date == today:
             return dict(_cache)
 
-        # Fetch fresh rates (outside lock would be cleaner but safe here for a
-        # simple per-day refresh — yfinance call is short)
-        _cache = _fetch_rates()
-        _cache_date = today
+    # Fetch outside the lock so other threads aren't blocked during I/O
+    fresh = _fetch_rates()
+
+    # Re-acquire lock to write; re-check in case another thread already updated
+    with _lock:
+        if _cache_date != today:
+            _cache = fresh
+            _cache_date = today
         return dict(_cache)

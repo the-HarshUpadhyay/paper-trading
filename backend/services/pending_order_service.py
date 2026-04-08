@@ -109,7 +109,7 @@ class PendingOrderService:
                 row = cur.fetchone()
             if not row:
                 return {"error": "Order not found"}, 404
-            return _row_to_dict(row), 201
+            return _row_to_dict(row), 200
         except Exception as e:
             logger.error("pending_order._get_by_id(%s): %s", order_id, e)
             return {"error": str(e)}, 500
