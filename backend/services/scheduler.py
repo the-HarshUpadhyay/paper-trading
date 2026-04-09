@@ -12,6 +12,9 @@ Design guarantees:
   - Stopping is clean: the loop checks an Event every second
   - Active ticker list is refreshed from DB every TICKER_REFRESH_INTERVAL seconds
     so new watchlist / portfolio additions are picked up automatically
+  - Call notify_ticker_added(ticker) after any add/buy event to register the
+    ticker immediately (prices available within the next 15 s tick) rather than
+    waiting up to TICKER_REFRESH_INTERVAL seconds for the next DB reload
 """
 from __future__ import annotations
 
@@ -40,6 +43,12 @@ class PriceScheduler:
         start_scheduler()          # call once at app startup
         ...
         stop_scheduler()           # call on SIGTERM / app teardown
+
+    After adding a ticker to the watchlist or executing a buy, call:
+        from services.scheduler import notify_ticker_added
+        notify_ticker_added(ticker)
+    This ensures the ticker is fetched on the very next price-refresh tick
+    (~15 s) instead of waiting for the DB reload interval (~60 s).
     """
 
     def __init__(self) -> None:
@@ -47,6 +56,7 @@ class PriceScheduler:
         self._thread: threading.Thread | None = None
         self._active_tickers: list[str] = []
         self._last_ticker_refresh: float = 0.0
+        self._lock = threading.Lock()  # guards _active_tickers
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -74,6 +84,30 @@ class PriceScheduler:
         if self._thread:
             self._thread.join(timeout=timeout)
         logger.info("PriceScheduler stopped")
+
+    def notify_ticker_added(self, ticker: str) -> None:
+        """
+        Immediately register *ticker* in the active set so it is included in
+        the next price-refresh tick (≤ PRICE_REFRESH_INTERVAL seconds away).
+
+        Call this after:
+          - A user adds a stock to the watchlist
+          - A user executes a BUY order
+          - Any other event that introduces a new ticker to track
+
+        This avoids the up-to-TICKER_REFRESH_INTERVAL second delay before the
+        next full DB reload picks up the new ticker.  The DB reload still runs
+        on its normal schedule and will include the ticker automatically, so
+        there is no risk of the ticker being silently dropped.
+        """
+        ticker = ticker.upper()
+        with self._lock:
+            if ticker not in self._active_tickers:
+                self._active_tickers.append(ticker)
+                logger.debug(
+                    "PriceScheduler: ticker %s registered immediately (will fetch on next tick)",
+                    ticker,
+                )
 
     # ── Internal helpers ───────────────────────────────────────────────────
 
@@ -112,29 +146,34 @@ class PriceScheduler:
 
         # Refresh the ticker list when due
         if (now - self._last_ticker_refresh) >= TICKER_REFRESH_INTERVAL:
-            self._active_tickers = self._load_active_tickers()
+            new_tickers = self._load_active_tickers()
+            with self._lock:
+                self._active_tickers = new_tickers
             self._last_ticker_refresh = now
 
-        if not self._active_tickers:
+        with self._lock:
+            active = list(self._active_tickers)
+
+        if not active:
             return
 
         try:
-            refresh_prices(self._active_tickers)
+            refresh_prices(active)
         except Exception as e:
             logger.error("Scheduler _tick error: %s", e)
 
         try:
             from services.cache import price_cache
             from services.pending_order_service import check_and_fill_all
-            prices = {t: price_cache.get(t) for t in self._active_tickers}
-            check_and_fill_all(self._active_tickers, prices)
+            prices = {t: price_cache.get(t) for t in active}
+            check_and_fill_all(active, prices)
         except Exception as e:
             logger.error("Scheduler check_and_fill_all error: %s", e)
 
         try:
             from services.cache import price_cache
             from services.alert_service import check_alerts
-            for ticker in self._active_tickers:
+            for ticker in active:
                 cached = price_cache.get(ticker)
                 if cached and cached.get("price"):
                     check_alerts(ticker, cached["price"])
@@ -146,7 +185,9 @@ class PriceScheduler:
         logger.info("PriceScheduler loop entered")
 
         # Prime the ticker list before the first sleep
-        self._active_tickers = self._load_active_tickers()
+        initial = self._load_active_tickers()
+        with self._lock:
+            self._active_tickers = initial
         self._last_ticker_refresh = time.time()
 
         while not self._stop_event.is_set():
@@ -175,3 +216,19 @@ def start_scheduler() -> None:
 def stop_scheduler() -> None:
     """Stop the global scheduler cleanly."""
     _scheduler.stop()
+
+
+def notify_ticker_added(ticker: str) -> None:
+    """
+    Immediately register *ticker* in the scheduler's active set.
+
+    Call this after watchlist-add or buy events so the new ticker is fetched
+    on the next tick (within PRICE_REFRESH_INTERVAL seconds) rather than
+    waiting for the next full DB reload (TICKER_REFRESH_INTERVAL seconds).
+
+    Example (in a route handler after a successful watchlist add)::
+
+        from services.scheduler import notify_ticker_added
+        notify_ticker_added(ticker)
+    """
+    _scheduler.notify_ticker_added(ticker)

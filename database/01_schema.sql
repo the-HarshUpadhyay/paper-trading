@@ -25,7 +25,7 @@ CREATE TABLE users (
     username       VARCHAR2(50)    NOT NULL,
     email          VARCHAR2(100)   NOT NULL,
     password_hash  VARCHAR2(256)   NOT NULL,
-    balance        NUMBER(15,2)    DEFAULT 100000.00 NOT NULL,
+    balance        NUMBER(15,2)    DEFAULT 10000000.00 NOT NULL,
     created_at     TIMESTAMP       DEFAULT SYSTIMESTAMP NOT NULL,
     is_active      NUMBER(1)       DEFAULT 1 NOT NULL,
     -- Constraints
@@ -37,7 +37,7 @@ CREATE TABLE users (
 );
 
 COMMENT ON TABLE  users             IS 'Registered platform users with paper-money balance';
-COMMENT ON COLUMN users.balance     IS 'Available cash for paper trading (default Rs.10,00,000)';
+COMMENT ON COLUMN users.balance     IS 'Available cash for paper trading (default Rs.1,00,00,000 = 1 Crore INR)';
 COMMENT ON COLUMN users.is_active   IS '1=active, 0=deactivated';
 
 -- ============================================================

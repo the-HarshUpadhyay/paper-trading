@@ -2,7 +2,8 @@
 set -e
 
 echo "==> Running demo seed..."
-python scripts/seed_demo.py
+python scripts/run_migrations.py
+python scripts/seed_demo.py || echo "==> Demo seed failed; starting Flask anyway."
 
 echo "==> Starting Flask..."
 exec python app.py

@@ -31,7 +31,10 @@ class Config:
     CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
     # ── Misc ───────────────────────────────────────────────
-    STARTING_BALANCE = 1_000_000.00
+    # Starting balance for new paper-trading accounts.
+    # Value is in INR: Rs.1,00,00,000 = 1 Crore = 10,000,000.
+    # The frontend RegionContext converts this to the user's selected display currency.
+    STARTING_BALANCE = 10_000_000.00
 
     # ── Price cache ────────────────────────────────────────
     PRICE_REFRESH_INTERVAL = int(os.environ.get("PRICE_REFRESH_INTERVAL", 300))

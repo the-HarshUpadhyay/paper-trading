@@ -6,7 +6,7 @@
 -- Demo user  (password = "demo1234" bcrypt-hashed — app layer hashes, this is placeholder)
 INSERT INTO users (username, email, password_hash, balance)
 VALUES ('demo_trader', 'demo@papertrading.com',
-        '$2b$12$demoHashPlaceholderReplaceWithRealBcryptHash', 1000000.00);
+        '$2b$12$demoHashPlaceholderReplaceWithRealBcryptHash', 10000000.00);
 
 -- Stock catalogue seed — Nifty 50 / popular NSE-listed Indian stocks
 -- Tickers use the .NS suffix (NSE) as required by yfinance
@@ -39,4 +39,4 @@ INSERT INTO stocks (ticker, company_name, sector, exchange) VALUES ('TATASTEEL.N
 COMMIT;
 
 PROMPT Sample data inserted successfully.
-PROMPT Default paper-trading balance: Rs.10,00,000
+PROMPT Default paper-trading balance: Rs.1,00,00,000 (1 Crore INR = 10,000,000)

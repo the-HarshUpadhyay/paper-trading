@@ -144,16 +144,33 @@ def check_and_fill(ticker: str, current_price: float) -> None:
             fill_price = current_price
 
             if otype == "LIMIT":
+                # LIMIT BUY  — fill at limit_price when market drops to or below it
+                # LIMIT SELL — fill at limit_price when market rises to or above it
                 if side == "BUY"  and current_price <= limit_p:
                     triggered  = True
                     fill_price = limit_p
                 elif side == "SELL" and current_price >= limit_p:
                     triggered  = True
                     fill_price = limit_p
+
             elif otype == "STOP":
+                # STOP (market-stop) orders fill at the current market price once triggered.
+                # STOP SELL — protective stop: triggers when price falls to/below stop_p
+                #             (used to limit downside on a long position)
+                # STOP BUY  — breakout buy: triggers when price rises to/above stop_p
+                #             (used to enter a long position on upward momentum)
                 if side == "SELL" and current_price <= stop_p:
                     triggered = True
+                elif side == "BUY" and current_price >= stop_p:
+                    triggered = True
+
             elif otype == "STOP_LIMIT":
+                # STOP_LIMIT BUY  — breakout buy with price cap:
+                #   triggers when price rises to/above stop_p (breakout confirmed),
+                #   but fills only at limit_p (caps the entry price to avoid slippage).
+                # STOP_LIMIT SELL — protective stop with price floor:
+                #   triggers when price falls to/below stop_p (loss threshold hit),
+                #   but fills only at limit_p (prevents a fill at a worse price).
                 if stop_p and limit_p:
                     if side == "SELL" and current_price <= stop_p:
                         triggered  = True
@@ -161,6 +178,7 @@ def check_and_fill(ticker: str, current_price: float) -> None:
                     elif side == "BUY" and current_price >= stop_p:
                         triggered  = True
                         fill_price = limit_p
+
 
             if not triggered:
                 continue

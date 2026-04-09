@@ -445,23 +445,40 @@ When using Docker Compose, `ORACLE_DSN` is automatically overridden to `db:1521/
 
 ---
 
-## Known Issues & Potential Bugs
+## Known Issues & Residual Risks
 
-> These are documented for awareness and future fixes.
+> Previously documented issues have been addressed as follows:
 
 ### Backend
 
-1. **`STARTING_BALANCE` mismatch** — `config.py` sets `STARTING_BALANCE = 1_000_000.00` but the README previously advertised $100,000. Ensure `04_sample_data.sql` and any seed `INSERT` statements use the same value, otherwise new accounts created via the UI and seeded demo accounts will have different balances.
+1. **`STARTING_BALANCE` mismatch — ✅ Fixed** — All balance references now use
+   `Config.STARTING_BALANCE = 10_000_000.00` (₹1,00,00,000 = 1 Crore INR).
+   This value flows from `config.py` → `auth_service.register` → `04_sample_data.sql`
+   → `01_schema.sql` DEFAULT → seed script.  The frontend `RegionContext` converts
+   the INR amount to the user's chosen display currency.
 
-2. **`alert_service.mark_read` SQL injection risk (low severity)** — The placeholders string is built via f-string with `len(notif_ids)`. Since the count, not the values, drives the f-string this is safe in practice, but the pattern is fragile. Prefer a fixed `IN (SELECT column_value FROM TABLE(:1))` binding.
+2. **`alert_service.mark_read` dynamic placeholder — ✅ Fixed** — The f-string
+   `IN (:1, :2, …)` pattern has been replaced with `executemany` using a single
+   fixed SQL statement.  No dynamic SQL is generated; values are always bound.
 
-3. **Pending order `STOP_LIMIT` BUY logic** — In `pending_order_service.py`, a `STOP_LIMIT BUY` triggers when `current_price >= stop_p`, which is atypical (a buy stop-limit usually triggers above the stop and fills at the limit). Verify this matches the intended trading semantics.
+3. **Pending order `STOP_LIMIT` BUY logic — ✅ Verified correct** — A `STOP_LIMIT BUY`
+   triggering when `current_price >= stop_p` is standard convention (buy the breakout,
+   fill at the limit price cap).  The code was correct; clarifying comments have been
+   added.  A missing `STOP BUY` case (breakout market buy) was also added.
 
-4. **`price_cache` singleton shared between Flask workers** — If the backend is later scaled with multiple processes (e.g. gunicorn `--workers N`), each worker will have its own in-memory cache, leading to stale/inconsistent prices across workers. For multi-process deployments, migrate the cache to Redis.
+4. **`price_cache` singleton in multi-process deployments — ⚠️ Documented** —
+   The cache is safe for single-process / single-worker deployments.  A comprehensive
+   warning and Redis migration guide have been added to `services/cache.py`.  The
+   README production checklist already calls this out.  **Residual risk:** running
+   `gunicorn --workers N` (N > 1) without Redis will cause cache drift between workers.
 
-### Frontend
+### Frontend / Scheduler
 
-5. **`PriceScheduler` ticker list refreshes every 60 s** — Stocks added to a watchlist or bought within the last 60 s may not be refreshed until the next ticker-list reload. This is by design but can cause temporarily stale prices on newly added items.
+5. **Newly added watchlist / bought stocks could be stale for up to 60 s —
+   ✅ Fixed** — `PriceScheduler` now exposes `notify_ticker_added(ticker)`.
+   The `/watchlist` POST and `/buy` POST routes call this immediately on success,
+   so the new ticker is fetched on the very next 15-second scheduler tick rather
+   than waiting up to 60 seconds for the next full DB reload.
 
 ---
 

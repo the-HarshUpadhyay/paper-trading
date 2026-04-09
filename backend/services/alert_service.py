@@ -91,14 +91,25 @@ class AlertService:
             return {"error": str(e)}, 500
 
     def mark_read(self, user_id: int, notif_ids: list):
+        """Mark one or more notifications as read for the given user.
+
+        Uses executemany with a single fixed-parameter UPDATE (no dynamic SQL)
+        so the pattern is safe and Oracle-friendly regardless of list length.
+        Each row is bound as (notif_id, user_id) — the user_id check prevents
+        users from marking other users' notifications read.
+        """
         try:
             if not notif_ids:
                 return {"message": "ok"}, 200
-            placeholders = ", ".join(f":{i+1}" for i in range(len(notif_ids)))
+            # Build a list of (notif_id, user_id) pairs — one per ID to update.
+            # executemany sends a fixed SQL statement with different bind values;
+            # no f-string interpolation of values is involved.
+            params = [(int(nid), int(user_id)) for nid in notif_ids]
             with DBCursor(auto_commit=True) as cur:
-                cur.execute(
-                    f"UPDATE notifications SET is_read = 1 WHERE user_id = :{len(notif_ids)+1} AND notif_id IN ({placeholders})",
-                    notif_ids + [user_id],
+                cur.executemany(
+                    "UPDATE notifications SET is_read = 1"
+                    " WHERE notif_id = :1 AND user_id = :2",
+                    params,
                 )
             return {"message": "Marked as read"}, 200
         except Exception as e:

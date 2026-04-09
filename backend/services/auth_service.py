@@ -5,6 +5,7 @@ import bcrypt
 from flask_jwt_extended import create_access_token
 import oracledb
 
+from config import Config
 from db.connection import DBCursor
 
 
@@ -16,8 +17,8 @@ class AuthService:
             with DBCursor(auto_commit=True) as cur:
                 cur.execute(
                     """INSERT INTO users (username, email, password_hash, balance)
-                       VALUES (:1, :2, :3, 10000000.00)""",
-                    [username, email, pw_hash]
+                       VALUES (:1, :2, :3, :4)""",
+                    [username, email, pw_hash, Config.STARTING_BALANCE]
                 )
             return {"message": "Registration successful"}, 201
         except oracledb.IntegrityError as e:

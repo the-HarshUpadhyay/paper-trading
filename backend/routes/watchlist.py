@@ -6,6 +6,7 @@ from flask_jwt_extended import jwt_required
 from utils import get_uid
 
 from services.watchlist_service import WatchlistService
+from services.scheduler import notify_ticker_added
 
 watchlist_bp = Blueprint("watchlist", __name__)
 _svc = WatchlistService()
@@ -29,6 +30,11 @@ def add_to_watchlist():
         return jsonify({"error": "ticker is required"}), 400
 
     result, status = _svc.add(user_id, ticker)
+    if status in (200, 201):
+        # Register the ticker immediately so the scheduler fetches its price on
+        # the next tick (~15 s) rather than waiting for the next full DB reload
+        # (up to TICKER_REFRESH_INTERVAL = 60 s).
+        notify_ticker_added(ticker)
     return jsonify(result), status
 
 

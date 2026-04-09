@@ -6,6 +6,7 @@ from flask_jwt_extended import jwt_required
 from utils import get_uid
 
 from services.trading_service import TradingService
+from services.scheduler import notify_ticker_added
 
 trading_bp = Blueprint("trading", __name__)
 _svc = TradingService()
@@ -32,6 +33,10 @@ def buy():
         return jsonify({"error": "quantity and price must be positive"}), 400
 
     result, status = _svc.buy(user_id, ticker, quantity, price)
+    if status in (200, 201):
+        # Immediately register the ticker in the scheduler so its price is
+        # refreshed on the next tick (~15 s), not after the next full DB reload.
+        notify_ticker_added(ticker)
     return jsonify(result), status
 
 

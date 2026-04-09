@@ -7,6 +7,30 @@ instance so one scheduler refresh benefits every concurrent request.
 TTLs:
   PRICE_TTL  = 30s  — how long basic price/change_pct data stays fresh
   QUOTE_TTL  = 60s  — how long a full quote (with fundamentals) stays fresh
+
+⚠️  MULTI-PROCESS LIMITATION
+------------------------------
+This cache is **process-local**.  When the backend runs with a multi-worker
+WSGI server (e.g. ``gunicorn --workers N`` with N > 1), each worker holds
+its own independent copy of the cache.  This means:
+
+  * Different workers may return different prices for the same ticker until
+    every worker's background scheduler has refreshed independently.
+  * Pending-order trigger checks run per-worker, so the same order could
+    (extremely rarely) be evaluated twice on two workers in the same tick.
+
+**For single-process deployments** (``python app.py``, ``gunicorn -w 1``)
+this is entirely safe and correct.
+
+**To support multi-process deployments**, replace the in-memory dict with a
+Redis-backed backend:
+  1.  Install ``redis`` and ``flask-caching`` (or use ``redis-py`` directly).
+  2.  Replace ``PriceCache._data`` with ``redis.StrictRedis`` hash operations.
+  3.  The public interface (``get``, ``set_price``, ``set_quote``, ...)
+      should remain unchanged to minimise callsite updates.
+  4.  Move the ``_in_progress`` deduplication set to a Redis SET with a TTL.
+
+Until then, run the backend as a single gunicorn worker to avoid cache drift.
 """
 from __future__ import annotations
 

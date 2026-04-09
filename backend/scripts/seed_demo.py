@@ -21,6 +21,33 @@ from datetime import datetime, timedelta
 from config import Config
 from db.connection import init_pool, get_connection
 
+
+def _table_exists(cur, table_name):
+    cur.execute(
+        "SELECT COUNT(*) FROM user_tables WHERE table_name = :1",
+        [table_name.upper()],
+    )
+    return cur.fetchone()[0] > 0
+
+
+def _column_exists(cur, table_name, column_name):
+    cur.execute(
+        """SELECT COUNT(*)
+             FROM user_tab_columns
+            WHERE table_name = :1
+              AND column_name = :2""",
+        [table_name.upper(), column_name.upper()],
+    )
+    return cur.fetchone()[0] > 0
+
+
+def _trigger_exists(cur, trigger_name):
+    cur.execute(
+        "SELECT COUNT(*) FROM user_triggers WHERE trigger_name = :1",
+        [trigger_name.upper()],
+    )
+    return cur.fetchone()[0] > 0
+
 # ─── Stock catalogue ───────────────────────────────────────────────────────────
 # 12 portfolio stocks + 5 watchlist-only = 17 tickers (safe for yfinance rate limits)
 STOCKS = [
@@ -305,13 +332,19 @@ def run():
 
     # ── 3. Wipe existing demo data ────────────────────────────────────────────
     print("Clearing old demo data …")
-    for table in [
+    tables_to_clear = [
         "portfolio_snapshots",
         "transactions",
         "holdings",
         "watchlist",
-        "watchlist_folders",
-    ]:
+    ]
+    if _table_exists(cur, "watchlist_folders"):
+        tables_to_clear.append("watchlist_folders")
+
+    for table in tables_to_clear:
+        if not _table_exists(cur, table):
+            print(f"  Skipping {table}: table not present")
+            continue
         cur.execute(f"DELETE FROM {table} WHERE user_id = :1", [user_id])
         print(f"  Deleted from {table}: {cur.rowcount} rows")
     conn.commit()
@@ -325,8 +358,12 @@ def run():
 
     # ── 5. Insert transactions ────────────────────────────────────────────────
     # Disable triggers that interfere with historical bulk inserts
-    for trg in ("TRG_VALIDATE_TRADE", "TRG_UPDATE_HOLDINGS", "TRG_UPDATE_USER_BALANCE"):
-        cur.execute(f"ALTER TRIGGER TRADER.{trg} DISABLE")
+    if _table_exists(cur, "transactions"):
+        for trg in ("TRG_VALIDATE_TRADE", "TRG_UPDATE_HOLDINGS", "TRG_UPDATE_USER_BALANCE"):
+            if _trigger_exists(cur, trg):
+                cur.execute(f"ALTER TRIGGER TRADER.{trg} DISABLE")
+    else:
+        print("Skipping transaction seed: transactions table not present")
 
     print(f"Inserting {len(TRANSACTIONS)} transactions …")
     for ds, ticker, ttype, qty, price in TRANSACTIONS:
@@ -391,21 +428,27 @@ def run():
     # ── 9. Watchlist + folders ────────────────────────────────────────────────
     print("Setting up watchlist …")
 
-    # Create two folders
-    import oracledb as _ora
+    has_watchlist_folders = _table_exists(cur, "watchlist_folders")
+    has_watchlist_folder_id = _column_exists(cur, "watchlist", "folder_id")
     folder_ids = {}
-    for fname in ("Growth Picks", "FMCG & Pharma"):
-        out = cur.var(_ora.NUMBER)
-        cur.execute(
-            """INSERT INTO watchlist_folders (user_id, name)
-               VALUES (:1, :2) RETURNING folder_id INTO :3""",
-            [user_id, fname, out],
-        )
-        fid = int(out.getvalue()[0])
-        folder_ids[fname] = fid
-    conn.commit()
 
-    # Watchlist entries: held stocks in their folders + watchlist-only stocks
+    if has_watchlist_folders and has_watchlist_folder_id:
+        import oracledb as _ora
+
+        for fname in ("Growth Picks", "FMCG & Pharma"):
+            out = cur.var(_ora.NUMBER)
+            cur.execute(
+                """INSERT INTO watchlist_folders (user_id, name)
+                   VALUES (:1, :2) RETURNING folder_id INTO :3""",
+                [user_id, fname, out],
+            )
+            fid = int(out.getvalue()[0])
+            folder_ids[fname] = fid
+        conn.commit()
+    else:
+        print("  Watchlist folders schema not present; seeding uncategorised watchlist items only.")
+
+    # Watchlist entries: held stocks in their folders when supported + watchlist-only stocks
     watchlist_entries = [
         # (ticker, folder_name_or_None)
         ("RELIANCE.NS",   "Growth Picks"),
@@ -424,7 +467,7 @@ def run():
         if not sid:
             continue
         fid = folder_ids.get(folder_name) if folder_name else None
-        if fid:
+        if fid and has_watchlist_folder_id:
             cur.execute(
                 """INSERT INTO watchlist (user_id, stock_id, folder_id)
                    VALUES (:1, :2, :3)""",
@@ -436,7 +479,10 @@ def run():
                 [user_id, sid],
             )
     conn.commit()
-    print(f"  {len(watchlist_entries)} watchlist entries added across 2 folders.")
+    if has_watchlist_folders and has_watchlist_folder_id:
+        print(f"  {len(watchlist_entries)} watchlist entries added across 2 folders.")
+    else:
+        print(f"  {len(watchlist_entries)} uncategorised watchlist entries added.")
 
     # ── Summary ───────────────────────────────────────────────────────────────
     total_cost = sum(

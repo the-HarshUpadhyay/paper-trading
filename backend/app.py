@@ -26,6 +26,14 @@ from routes.pending_orders import pending_orders_bp
 from routes.alerts         import alerts_bp
 
 
+MIGRATIONS = [
+    "001_notes.sql",
+    "002_watchlist_folders.sql",
+    "003_pending_orders.sql",
+    "004_alerts.sql",
+]
+
+
 def run_migration(filename: str) -> None:
     path = os.path.join(os.path.dirname(__file__), "db", "migrations", filename)
     try:
@@ -45,6 +53,11 @@ def run_migration(filename: str) -> None:
             conn.close()
     except Exception as e:
         logging.getLogger(__name__).warning("Migration %s: %s", filename, e)
+
+
+def apply_migrations() -> None:
+    for migration in MIGRATIONS:
+        run_migration(migration)
 
 
 def create_app() -> Flask:
@@ -83,13 +96,7 @@ def create_app() -> Flask:
         pass  # Pool and scheduler live for the full app lifetime
 
     # ── Migrations ─────────────────────────────────────────────────────────
-    for migration in [
-        "001_notes.sql",
-        "002_watchlist_folders.sql",
-        "003_pending_orders.sql",
-        "004_alerts.sql",
-    ]:
-        run_migration(migration)
+    apply_migrations()
 
     # ── Blueprints ─────────────────────────────────────────────────────────
     app.register_blueprint(auth_bp,           url_prefix="/api")
