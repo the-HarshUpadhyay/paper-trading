@@ -1,6 +1,41 @@
 # PaperTrade — Financial Investment & Portfolio Management System
 
-A production-quality paper trading platform built with **Oracle 21c XE**, **Python Flask**, and **React**. Practice stock trading with $1,000,000 in virtual cash, real-time prices via Yahoo Finance, multi-currency support, and a clean Zerodha Kite-inspired UI.
+A production-quality paper trading platform built with **Oracle 21c XE**, **Python Flask**, and **React**. Practice stock trading with ₹1,00,00,000 in virtual cash, real-time prices via Yahoo Finance, multi-currency support, and a clean Zerodha Kite-inspired UI.
+
+> **Course Context:** Developed as a comprehensive Database Systems Lab project demonstrating Oracle normalization, PL/SQL triggers & stored procedures, constraint-driven data integrity, and real-time analytics — all exposed through a modern three-tier web application.
+
+---
+
+## Table of Contents
+
+1. [Features](#features)
+2. [Tech Stack & Architecture Decisions](#tech-stack--architecture-decisions)
+3. [System Architecture](#system-architecture)
+4. [Project Structure](#project-structure)
+5. [Database Design (Deep Dive)](#database-design-deep-dive)
+   - [ER Diagram](#er-diagram)
+   - [Normalization (3NF)](#normalization-to-3nf)
+   - [Core Tables](#core-tables)
+   - [Migration Tables](#migration-tables-v2)
+   - [Indexing Strategy](#indexing-strategy)
+   - [Constraints & Data Integrity](#constraints--data-integrity)
+   - [PL/SQL Triggers](#plsql-triggers)
+   - [PL/SQL Packages, Procedures & Functions](#plsql-packages-procedures--functions)
+   - [Views](#views)
+   - [Connection & Pooling](#oracle-connection-pooling)
+   - [DB-Backed Price Cache](#db-backed-price-cache)
+   - [Migration Strategy](#migration-strategy)
+6. [Setup & Installation](#setup--installation)
+7. [REST API Reference](#rest-api-reference)
+8. [Pages](#pages)
+9. [Business Rules](#business-rules)
+10. [Background Services](#background-services)
+11. [Multi-Currency Support](#multi-currency-support)
+12. [Configuration Reference](#configuration-reference)
+13. [Known Issues & Potential Bugs](#known-issues--potential-bugs)
+14. [Production Checklist](#production-checklist)
+15. [Screenshots](#screenshots)
+16. [License](#license)
 
 ---
 
@@ -33,19 +68,99 @@ A production-quality paper trading platform built with **Oracle 21c XE**, **Pyth
 
 ---
 
-## Tech Stack
+## Tech Stack & Architecture Decisions
 
-| Layer       | Technology                                      |
-|-------------|-------------------------------------------------|
-| Database    | Oracle 21c XE (SQL + PL/SQL)                    |
-| Backend     | Python 3.12, Flask, oracledb                    |
-| Auth        | JWT (flask-jwt-extended), bcrypt                |
-| Market Data | yfinance (Yahoo Finance)                        |
-| FX Rates    | yfinance Forex tickers (USDINR=X, etc.)         |
-| Frontend    | React 18, React Router v6, Vite                 |
-| Charts      | Recharts                                        |
-| Icons       | Lucide React                                    |
-| Dev Infra   | Docker, Docker Compose                          |
+### Technology Choices
+
+| Layer | Technology | Why This Choice |
+|-------|-----------|-----------------|
+| **Database** | Oracle 21c XE (SQL + PL/SQL) | Enterprise-grade RDBMS with ACID compliance; native support for PL/SQL triggers, stored packages, and `GENERATED ALWAYS AS IDENTITY` columns; `MERGE` for upserts; function-based indexes; and `NUMTODSINTERVAL` for time arithmetic — all critical for a financial system |
+| **Backend** | Python 3.12, Flask | Lightweight and flexible; `oracledb` (thin mode) provides zero-dependency Oracle access without Instant Client; Flask blueprints give clean API modularity |
+| **Auth** | JWT (`flask-jwt-extended`), `bcrypt` | Stateless auth via signed tokens avoids server-side session storage; bcrypt with auto-generated salts for password hashing |
+| **Market Data** | `yfinance` (Yahoo Finance) | Free, no-API-key access to real-time and historical stock data; supports NSE (`.NS` suffix), NYSE, NASDAQ, and global exchanges |
+| **FX Rates** | `yfinance` Forex tickers (`USDINR=X`, etc.) | Same library for consistency; daily-cached rates with hardcoded fallbacks for resilience |
+| **Frontend** | React 18, React Router v6, Vite | React 18's concurrency model suits high-frequency state updates (live prices); Vite's ESM-native dev server gives sub-second HMR; Router v6 for type-safe nested routing |
+| **Charts** | Recharts | Declarative, composable React charting library with responsive container support — ideal for portfolio growth, candlestick, and allocation charts |
+| **Icons** | Lucide React | Tree-shakeable icon library, consistent with modern design systems |
+| **Dev Infra** | Docker, Docker Compose | Three-service orchestration (Oracle XE + Flask + Vite) with a single command; named volume for DB persistence; healthcheck-based startup ordering |
+
+### Key Architectural Decisions
+
+1. **Database-Driven Business Logic (Triggers over Application Code)**
+   Trade validation, holdings maintenance, and balance updates are implemented as Oracle PL/SQL triggers — not in the Python application layer. This ensures data integrity regardless of how the database is accessed (API, SQL*Plus, or another client). The "defense in depth" pattern means even if the Flask app has a bug, the database itself prevents invalid states.
+
+2. **Immutable Transaction Ledger**
+   The `TRANSACTIONS` table is append-only — no `UPDATE` or `DELETE` operations ever touch it. Holdings and balances are derived from transactions via triggers, mirroring the event-sourcing pattern used in real financial systems.
+
+3. **Never Fetch Prices in Request Handlers**
+   No API endpoint directly calls yfinance. Two background daemon threads (`PriceScheduler` every 15 s, `price_refresh` every 300 s) push prices into an in-memory `PriceCache`. Request handlers read from cache, making portfolio/watchlist responses sub-millisecond. This is achieved via a **stale-while-revalidate** strategy — stale data is served immediately while a background thread refreshes.
+
+4. **Two-Tier Caching (In-Memory + DB)**
+   The in-memory `PriceCache` is the hot serving layer (TTL: 30 s basic, 60 s full quote). A `stock_price_cache` table in Oracle persists prices for cross-restart warmup — on startup, entries less than 1 hour old are loaded back into memory so the first requests don't suffer cold-cache misses.
+
+5. **Connection Pooling**
+   Oracle connections are expensive to establish. A module-level `oracledb.ConnectionPool` (min=2, max=10) is shared across all threads. The `DBCursor` context manager acquires → auto-commits/rollbacks → releases back to the pool on every operation.
+
+6. **Idempotent Migrations**
+   All schema changes beyond the core tables are delivered as numbered migration scripts (`001_notes.sql` through `005_watchlist_multi_folder.sql`) that execute at every backend startup. Each uses Oracle `EXCEPTION WHEN OTHERS` blocks that silently swallow "already exists" errors, making them safe to re-run.
+
+---
+
+## System Architecture
+
+```
+┌──────────────┐         ┌──────────────────┐         ┌──────────────────────────────────┐
+│              │  HTTP    │                  │ oracledb │                                  │
+│   React UI   │◄───────►│   Flask API      │◄────────►│       Oracle 21c XE              │
+│   (Vite)     │  /api/* │   (Blueprints)   │  Pool    │   ┌──────────────────────────┐   │
+│              │         │                  │ (2-10    │   │ PL/SQL Triggers          │   │
+│  ┌────────┐  │         │  ┌────────────┐  │  conns)  │   │  • trg_validate_trade     │   │
+│  │Context │  │         │  │ Services   │  │          │   │  • trg_update_holdings    │   │
+│  │ Auth   │  │         │  │ Trading    │  │          │   │  • trg_update_user_balance│   │
+│  │ Theme  │  │         │  │ Portfolio  │  │          │   │  • trg_stocks_upper_ticker│   │
+│  │ Region │  │         │  │ Watchlist  │  │          │   ├──────────────────────────┤   │
+│  └────────┘  │         │  │ Alerts     │  │          │   │ PL/SQL Packages          │   │
+│              │         │  │ Notes      │  │          │   │  • pkg_trading            │   │
+└──────────────┘         │  └────────────┘  │          │   │  • pkg_portfolio          │   │
+                         │                  │          │   ├──────────────────────────┤   │
+                         │  ┌────────────┐  │          │   │ Views                    │   │
+                         │  │ Background │  │          │   │  • vw_user_holdings_detail│   │
+                         │  │  Daemons   │  │          │   │  • vw_transaction_history │   │
+                         │  │ Scheduler  │──┤          │   └──────────────────────────┘   │
+                         │  │ (15s tick) │  │          │                                  │
+                         │  │            │  │          │   Tables: USERS, STOCKS,         │
+                         │  │ PriceRefr. │  │          │   TRANSACTIONS, HOLDINGS,        │
+                         │  │ (300s tick)│  │          │   WATCHLIST, PORTFOLIO_SNAPSHOTS, │
+                         │  └────────────┘  │          │   NOTES, WATCHLIST_FOLDERS,       │
+                         │                  │          │   PENDING_ORDERS, PRICE_ALERTS,   │
+                         │  ┌────────────┐  │          │   NOTIFICATIONS,                  │
+                         │  │ PriceCache │  │          │   STOCK_PRICE_CACHE               │
+                         │  │ (in-mem)   │  │          │                                  │
+                         │  │ TTL: 30/60s│  │          └──────────────────────────────────┘
+                         │  └────────────┘  │
+                         │                  │
+                         │  ┌────────────┐  │
+                         │  │  yfinance  │◄─┤  (only from daemon threads, never from
+                         │  │  (Yahoo)   │  │   request handlers)
+                         │  └────────────┘  │
+                         └──────────────────┘
+```
+
+**Data Flow (Buy Order):**
+```
+User clicks BUY → React POST /api/buy → Flask route → TradingService.buy()
+  → cur.callproc("pkg_trading.execute_buy", [...])
+     → Oracle pkg_trading.execute_buy:
+         1. upsert_stock() — INSERT stock if not in catalogue
+         2. INSERT INTO transactions — fires BEFORE trigger:
+            └── trg_validate_trade — checks balance, computes total_amount
+         3. AFTER triggers fire in sequence:
+            ├── trg_update_holdings — VWAP upsert into holdings
+            └── trg_update_user_balance — deducts cash
+         4. COMMIT
+  → Flask saves portfolio snapshot (best-effort)
+  → HTTP 201 response with transaction details
+```
 
 ---
 
@@ -67,7 +182,7 @@ paper-trading/
 │   ├── scripts/
 │   │   └── seed_demo.py       Seed demo user + sample portfolio data
 │   ├── app.py                 Flask application factory (v2: scheduler, migrations)
-│   ├── config.py              Configuration (env vars, starting balance = $1,000,000)
+│   ├── config.py              Configuration (env vars, starting balance = ₹1,00,00,000)
 │   ├── utils.py               Shared helpers (get_uid, scalar_out)
 │   ├── requirements.txt
 │   ├── .env.example
@@ -78,7 +193,8 @@ paper-trading/
 │   │       ├── 001_notes.sql           NOTES table
 │   │       ├── 002_watchlist_folders.sql  WATCHLIST_FOLDERS + folder_id column
 │   │       ├── 003_pending_orders.sql  PENDING_ORDERS table
-│   │       └── 004_alerts.sql          PRICE_ALERTS + NOTIFICATIONS tables
+│   │       ├── 004_alerts.sql          PRICE_ALERTS + NOTIFICATIONS tables
+│   │       └── 005_watchlist_multi_folder.sql  Constraint replacement for multi-folder
 │   ├── routes/
 │   │   ├── auth.py            /register  /login  /me  /logout
 │   │   ├── stocks.py          /stocks/search  /stocks/<ticker>  /history
@@ -142,48 +258,404 @@ paper-trading/
 
 ---
 
-## Database Schema
+## Database Design (Deep Dive)
 
-### Core Tables (01_schema.sql)
+### ER Diagram
+
+![ER Diagram](er_diagram.png)
+
+---
+
+### Normalization to 3NF
+
+The schema follows **Third Normal Form (3NF)** to eliminate data redundancy and ensure update anomaly-free operations:
+
+| NF | How It Is Enforced |
+|----|-------------------|
+| **1NF** | Every column stores atomic, single-valued data. No repeating groups or arrays — e.g., each watchlist item is a separate row, not a comma-separated list inside the `users` table. All tables have a defined primary key (`GENERATED ALWAYS AS IDENTITY`). |
+| **2NF** | All non-key attributes are fully functionally dependent on the entire primary key. No partial dependencies — composite keys like `(user_id, stock_id)` in `HOLDINGS` have all attributes (quantity, avg_buy_price) dependent on *both* columns together. |
+| **3NF** | No transitive dependencies. Stock metadata (`company_name`, `sector`, `exchange`) are stored only in `STOCKS` and referenced via `stock_id` foreign keys in `TRANSACTIONS`, `HOLDINGS`, and `WATCHLIST` — never duplicated. The `total_amount` column in TRANSACTIONS is a computed field (`quantity × price`) set by the `trg_validate_trade` trigger, but is intentionally denormalized for query performance on the immutable ledger. |
+
+**Deliberate Denormalization:**
+- `HOLDINGS.avg_buy_price` — Maintained by triggers to avoid recalculating VWAP from the full transaction history on every portfolio query. This is a controlled denormalization; the trigger ensures consistency.
+- `PORTFOLIO_SNAPSHOTS` — A time-series projection of portfolio value; inherently denormalized for chart rendering performance.
+- `STOCK_PRICE_CACHE` — A materialized cache of external API data; not part of the core transactional schema.
+
+---
+
+### Core Tables
+
+These six tables are created by `01_schema.sql` and form the foundational transactional schema:
+
+#### USERS — User Accounts & Cash Balance
+```sql
+CREATE TABLE users (
+    user_id        NUMBER          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username       VARCHAR2(50)    NOT NULL,
+    email          VARCHAR2(100)   NOT NULL,
+    password_hash  VARCHAR2(256)   NOT NULL,
+    balance        NUMBER(15,2)    DEFAULT 100000.00 NOT NULL,
+    created_at     TIMESTAMP       DEFAULT SYSTIMESTAMP NOT NULL,
+    is_active      NUMBER(1)       DEFAULT 1 NOT NULL,
+    CONSTRAINT uq_users_username  UNIQUE (username),
+    CONSTRAINT uq_users_email     UNIQUE (email),
+    CONSTRAINT chk_users_balance  CHECK  (balance >= 0),
+    CONSTRAINT chk_users_active   CHECK  (is_active IN (0,1)),
+    CONSTRAINT chk_users_email    CHECK  (email LIKE '%@%.%')
+);
+```
+- **Identity column** — `GENERATED ALWAYS AS IDENTITY` makes `user_id` a system-managed surrogate key (no manually specified values allowed) → prevents PK collisions
+- **Balance CHECK** — `balance >= 0` is the *last line of defense* against negative balances; the `trg_validate_trade` trigger rejects insufficient funds before this constraint ever fires
+- **Email validation** — `CHECK (email LIKE '%@%.%')` provides basic format validation at the database level
+
+#### STOCKS — Stock Catalogue
+```sql
+CREATE TABLE stocks (
+    stock_id      NUMBER          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ticker        VARCHAR2(20)    NOT NULL,
+    company_name  VARCHAR2(200)   NOT NULL,
+    sector        VARCHAR2(100),
+    exchange      VARCHAR2(50),
+    CONSTRAINT uq_stocks_ticker   UNIQUE (ticker),
+    CONSTRAINT chk_stocks_ticker  CHECK  (ticker = UPPER(ticker))
+);
+```
+- Populated lazily on first search or trade via `pkg_trading.upsert_stock()`
+- **Uppercase enforcement** — Both a `CHECK` constraint and a `BEFORE INSERT/UPDATE` trigger guarantee tickers are stored in uppercase, preventing duplicate entries like `AAPL` vs `aapl`
+- Seeded with 25 NSE-listed Indian stocks (`.NS` suffix for yfinance compatibility)
+
+#### TRANSACTIONS — Immutable Trade Ledger
+```sql
+CREATE TABLE transactions (
+    transaction_id    NUMBER          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id           NUMBER          NOT NULL,
+    stock_id          NUMBER          NOT NULL,
+    transaction_type  VARCHAR2(4)     NOT NULL,     -- 'BUY' or 'SELL'
+    quantity          NUMBER(12,4)    NOT NULL,
+    price             NUMBER(15,4)    NOT NULL,
+    total_amount      NUMBER(18,4)    NOT NULL,     -- set by trigger
+    transaction_time  TIMESTAMP       DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT fk_trans_user    FOREIGN KEY (user_id)  REFERENCES users(user_id),
+    CONSTRAINT fk_trans_stock   FOREIGN KEY (stock_id) REFERENCES stocks(stock_id),
+    CONSTRAINT chk_trans_type   CHECK (transaction_type IN ('BUY','SELL')),
+    CONSTRAINT chk_trans_qty    CHECK (quantity > 0),
+    CONSTRAINT chk_trans_price  CHECK (price > 0),
+    CONSTRAINT chk_trans_total  CHECK (total_amount > 0)
+);
+```
+- **Event-sourcing design** — This table is **never updated or deleted**; it is an append-only ledger. Every trade is a new row; holdings and balances are *derived* from it via triggers
+- `total_amount` is auto-computed by `trg_validate_trade` as `quantity × price`
+- Three CHECK constraints prevent nonsensical data (zero/negative quantity, price, or total)
+
+#### HOLDINGS — Live Open Positions
+```sql
+CREATE TABLE holdings (
+    holding_id     NUMBER          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id        NUMBER          NOT NULL,
+    stock_id       NUMBER          NOT NULL,
+    quantity       NUMBER(12,4)    DEFAULT 0 NOT NULL,
+    avg_buy_price  NUMBER(15,4)    DEFAULT 0 NOT NULL,
+    last_updated   TIMESTAMP       DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT uq_hold_user_stk  UNIQUE (user_id, stock_id),
+    CONSTRAINT chk_hold_qty      CHECK (quantity >= 0),
+    CONSTRAINT chk_hold_avg      CHECK (avg_buy_price >= 0)
+);
+```
+- **Trigger-maintained** — Application code never directly INSERTs/UPDATEs this table; all mutations come from `trg_update_holdings` firing after a transaction INSERT
+- `UNIQUE (user_id, stock_id)` — One holding row per user/stock pair
+- `avg_buy_price` stores the Volume-Weighted Average Price (VWAP) cost basis, recalculated on each purchase
+- **Zero-quantity cleanup** — When a user sells 100% of a position, the trigger deletes the holding row entirely
+
+#### WATCHLIST
+```sql
+CREATE TABLE watchlist (
+    watchlist_id  NUMBER    GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id       NUMBER    NOT NULL,
+    stock_id      NUMBER    NOT NULL,
+    added_at      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+    folder_id     NUMBER    REFERENCES watchlist_folders(folder_id) ON DELETE SET NULL
+);
+```
+- Initially enforced `UNIQUE(user_id, stock_id)` — migration 005 replaced this with a function-based unique index `(user_id, stock_id, NVL(folder_id, -1))` to allow the same ticker in multiple folders (but not twice in the *same* folder)
+- `ON DELETE SET NULL` on `folder_id` means deleting a folder moves its items to the "unfiled" state rather than deleting them
+
+#### PORTFOLIO_SNAPSHOTS — Time-Series Valuations
+```sql
+CREATE TABLE portfolio_snapshots (
+    snapshot_id    NUMBER          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id        NUMBER          NOT NULL,
+    total_value    NUMBER(18,2)    NOT NULL,
+    cash_balance   NUMBER(15,2)    NOT NULL,
+    holdings_value NUMBER(18,2)    NOT NULL,
+    snapshot_date  TIMESTAMP       DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT chk_snap_total   CHECK (total_value >= 0),
+    CONSTRAINT chk_snap_cash    CHECK (cash_balance >= 0),
+    CONSTRAINT chk_snap_holdval CHECK (holdings_value >= 0)
+);
+```
+- Saved *after every trade* and periodically every ~6 minutes by the scheduler
+- Powers the portfolio growth chart on the Analytics page
+- Time-based queries use `NUMTODSINTERVAL(:days, 'DAY')` for correct date arithmetic across DST transitions
+
+---
+
+### Migration Tables (v2)
+
+These tables are auto-applied at every backend startup via numbered, idempotent migration scripts:
+
+| Migration | Table(s) | Purpose | Key Columns |
+|-----------|----------|---------|-------------|
+| `001_notes.sql` | **NOTES** | Trading journal entries | `note_id PK`, `user_id FK → USERS`, `ticker VARCHAR2(20)`, `title`, `body CLOB`, `created_at`, `updated_at` |
+| `002_watchlist_folders.sql` | **WATCHLIST_FOLDERS** | Named folders for watchlist organisation | `folder_id PK`, `user_id FK → USERS`, `name VARCHAR2(100)`, `UNIQUE(user_id, name)` |
+| `003_pending_orders.sql` | **PENDING_ORDERS** | Limit/Stop/Stop-Limit orders awaiting execution | `order_id PK`, `user_id FK → USERS`, `stock_id FK → STOCKS`, `order_side CHECK (BUY/SELL)`, `order_type CHECK (LIMIT/STOP/STOP_LIMIT)`, `status CHECK (OPEN/FILLED/CANCELLED/EXPIRED)` |
+| `004_alerts.sql` | **PRICE_ALERTS**, **NOTIFICATIONS** | Price threshold alerts and in-app notification feed | `alert_id PK`, `condition CHECK (ABOVE/BELOW)`, `is_active`, `triggered_at`; `notif_id PK`, `alert_id FK → PRICE_ALERTS ON DELETE SET NULL`, `is_read` |
+| `005_watchlist_multi_folder.sql` | *(index only)* | Replaces `UNIQUE(user_id, stock_id)` with `UNIQUE(user_id, stock_id, NVL(folder_id,-1))` | Allows the same ticker in different folders |
+
+**Referential Integrity Pattern:**
+- `ON DELETE CASCADE` on `user_id` FKs — Deleting a user cleans up all their notes, alerts, notifications, orders, and watchlist items automatically
+- `ON DELETE SET NULL` on `alert_id` in NOTIFICATIONS — Preserves notification history even if the alert is deleted
+- `ON DELETE SET NULL` on `folder_id` in WATCHLIST — Deleting a folder orphans items into "unfiled" rather than deleting them
+
+---
+
+### Indexing Strategy
+
+Indexes are designed around the application's actual query patterns:
+
+| Index | Table | Columns | Query Pattern |
+|-------|-------|---------|---------------|
+| `idx_trans_user` | TRANSACTIONS | `(user_id, transaction_time DESC)` | Order history page (paginated, most-recent-first) |
+| `idx_trans_stock` | TRANSACTIONS | `(stock_id, transaction_time DESC)` | Per-stock transaction drill-down |
+| `idx_trans_user_type` | TRANSACTIONS | `(user_id, transaction_type)` | Filter orders by BUY/SELL type |
+| `idx_hold_user` | HOLDINGS | `(user_id)` | Portfolio page (all holdings for a user) |
+| `idx_watch_user` | WATCHLIST | `(user_id)` | Watchlist page |
+| `idx_snap_user_date` | PORTFOLIO_SNAPSHOTS | `(user_id, snapshot_date DESC)` | Time-series growth chart with date range filter |
+| `idx_stocks_name` | STOCKS | `UPPER(company_name)` | **Function-based index** for case-insensitive company name search |
+| `idx_notes_user` | NOTES | `(user_id)` | User's notes listing |
+| `idx_notes_ticker` | NOTES | `(ticker)` | Filter notes by stock ticker |
+| `idx_po_user_status` | PENDING_ORDERS | `(user_id, status)` | List user's open/filled/cancelled orders |
+| `idx_po_stock_status` | PENDING_ORDERS | `(stock_id, status)` | Scheduler: find OPEN orders for a given stock |
+| `idx_notif_user_unread` | NOTIFICATIONS | `(user_id, is_read)` | Unread notification count badge |
+| `idx_alert_ticker` | PRICE_ALERTS | `(ticker, is_active)` | Scheduler: find active alerts for a given ticker |
+| `idx_wl_folder` | WATCHLIST | `(folder_id)` | Filter watchlist by folder |
+| `idx_wl_user_stk_folder` | WATCHLIST | `(user_id, stock_id, NVL(folder_id,-1))` | **Function-based unique index** — prevents duplicate ticker-folder pairs while allowing same ticker across folders |
+
+> **Design choice:** `DESC` ordering on timestamp indexes for transactions and snapshots avoids expensive `ORDER BY ... DESC` sorts at query time — the optimizer can scan the index in natural order.
+
+---
+
+### Constraints & Data Integrity
+
+The database enforces integrity at five levels:
 
 ```
-USERS               — Registered users with paper-money balance ($1,000,000 default)
-STOCKS              — Stock catalogue (populated on first search/trade)
-TRANSACTIONS        — Immutable trade ledger (BUY / SELL)
-HOLDINGS            — Live open positions per user (maintained by trigger)
-WATCHLIST           — User-specific stock watchlist
-PORTFOLIO_SNAPSHOTS — Periodic portfolio valuations for growth chart
+Level 1: NOT NULL          — No mandatory field can be skipped
+Level 2: CHECK             — Domain validation (balance ≥ 0, quantity > 0, type ∈ {BUY,SELL})
+Level 3: UNIQUE            — No duplicate usernames, emails, tickers, or holdings
+Level 4: FOREIGN KEY       — Referential integrity across all relationships
+Level 5: TRIGGER           — Complex business rules (oversell prevention, VWAP, balance updates)
 ```
 
-### Migration Tables (auto-applied at startup)
+**Complete constraint inventory:**
 
+| Constraint | Type | Rule |
+|-----------|------|------|
+| `uq_users_username` | UNIQUE | No duplicate usernames |
+| `uq_users_email` | UNIQUE | No duplicate emails |
+| `chk_users_balance` | CHECK | `balance >= 0` (last-resort; trigger prevents this pre-emptively) |
+| `chk_users_active` | CHECK | `is_active IN (0,1)` — boolean-like flag |
+| `chk_users_email` | CHECK | `email LIKE '%@%.%'` — basic email format |
+| `uq_stocks_ticker` | UNIQUE | No duplicate ticker symbols |
+| `chk_stocks_ticker` | CHECK | `ticker = UPPER(ticker)` — enforces uppercase storage |
+| `chk_trans_type` | CHECK | `transaction_type IN ('BUY','SELL')` |
+| `chk_trans_qty` | CHECK | `quantity > 0` — no zero-quantity trades |
+| `chk_trans_price` | CHECK | `price > 0` — no free stocks |
+| `chk_trans_total` | CHECK | `total_amount > 0` |
+| `uq_hold_user_stk` | UNIQUE | One holding row per user/stock pair |
+| `chk_hold_qty` | CHECK | `quantity >= 0` |
+| `chk_hold_avg` | CHECK | `avg_buy_price >= 0` |
+| `chk_snap_total/cash/holdval` | CHECK | All snapshot values `>= 0` |
+| `uq_wl_folder` | UNIQUE | `(user_id, name)` — no duplicate folder names per user |
+
+---
+
+### PL/SQL Triggers
+
+Four triggers enforce business rules at the database layer:
+
+#### 1. `trg_validate_trade` (BEFORE INSERT on TRANSACTIONS)
 ```
-NOTES               — User trading journal entries, optionally linked to a ticker
-WATCHLIST_FOLDERS   — Named folders for organising watchlist items
-PENDING_ORDERS      — Limit / Stop / Stop-Limit orders awaiting execution
-PRICE_ALERTS        — Price threshold alerts (ABOVE / BELOW) per user/ticker
-NOTIFICATIONS       — In-app notifications generated when an alert triggers
-005 (index)         — Replaces UNIQUE(user_id, stock_id) with UNIQUE(user_id, stock_id, NVL(folder_id,-1))
-                      allowing the same ticker in multiple watchlist folders
+Purpose: Pre-flight validation for every trade
+Fires:   BEFORE INSERT — can modify :NEW row or raise an error to abort
+Logic:
+  1. Always computes :NEW.total_amount = :NEW.quantity × :NEW.price
+  2. On SELL:
+     - Queries HOLDINGS for the user's position quantity
+     - If owned < requested → RAISE_APPLICATION_ERROR(-20001, 'Insufficient holdings')
+  3. On BUY:
+     - Queries USERS.balance
+     - If balance < required → RAISE_APPLICATION_ERROR(-20002, 'Insufficient balance')
+```
+> **Why a BEFORE trigger?** — It sets `total_amount` *before* the row is written, and it can abort the INSERT with `RAISE_APPLICATION_ERROR` before any side effects fire.
+
+#### 2. `trg_update_holdings` (AFTER INSERT on TRANSACTIONS)
+```
+Purpose: Maintain the HOLDINGS table (virtual materialized view)
+Fires:   AFTER INSERT — the transaction row is already committed
+Logic:
+  On BUY:
+    - If no holding exists → INSERT new holding (qty = trade qty, avg = trade price)
+    - If holding exists → VWAP cost basis recalculation:
+        new_qty  = old_qty + buy_qty
+        new_avg  = (old_qty × old_avg + buy_qty × buy_price) / new_qty
+  On SELL:
+    - new_qty = old_qty − sell_qty
+    - If new_qty = 0 → DELETE the holding row
+    - Otherwise → UPDATE quantity (avg_buy_price is unchanged on sells)
+```
+> **VWAP formula** — This is the standard Volume-Weighted Average Price calculation used by real brokerages (Zerodha, Groww, etc.) to compute cost basis.
+
+#### 3. `trg_update_user_balance` (AFTER INSERT on TRANSACTIONS)
+```
+Purpose: Keep the user's cash balance in sync with trades
+Logic:
+  BUY  → UPDATE users SET balance = balance - total_amount
+  SELL → UPDATE users SET balance = balance + total_amount
 ```
 
-### PL/SQL Objects
+#### 4. `trg_stocks_upper_ticker` (BEFORE INSERT OR UPDATE on STOCKS)
+```
+Purpose: Normalize ticker symbols to uppercase
+Logic:   :NEW.ticker = UPPER(TRIM(:NEW.ticker))
+```
+> **Belt and suspenders** — The `CHECK (ticker = UPPER(ticker))` constraint would reject lowercase tickers; this trigger *prevents* them from ever reaching the constraint, providing a cleaner user experience (no error).
 
-| Object | Type | Purpose |
-|---|---|---|
-| `trg_validate_trade` | BEFORE INSERT trigger | Blocks oversells; checks cash balance; sets `total_amount` |
-| `trg_update_holdings` | AFTER INSERT trigger | Upserts holdings with VWAP cost basis; deletes zero-qty rows |
-| `trg_update_user_balance` | AFTER INSERT trigger | Deducts cash on BUY, credits on SELL |
-| `trg_stocks_upper_ticker` | BEFORE INSERT/UPDATE trigger | Forces tickers to uppercase |
-| `pkg_trading.execute_buy` | Procedure | Validates, resolves stock, inserts transaction |
-| `pkg_trading.execute_sell` | Procedure | Validates, inserts transaction |
-| `pkg_trading.upsert_stock` | Function | Inserts stock if not in catalogue; returns stock_id |
-| `pkg_portfolio.get_portfolio_value` | Function | Returns user's cash balance |
-| `pkg_portfolio.save_snapshot` | Procedure | Saves a portfolio valuation snapshot |
-| `pkg_portfolio.get_holding_pl` | Function | Calculates P&L for one holding |
-| `fn_user_total_invested` | Function | Sum of all open cost bases |
-| `vw_user_holdings_detail` | View | Holdings joined with stock info |
-| `vw_transaction_history` | View | Transactions joined with stock info |
+---
+
+### PL/SQL Packages, Procedures & Functions
+
+#### Package: `pkg_trading`
+The public API for all trade execution — called via `cur.callproc()` from Python:
+
+| Member | Type | Signature | Behavior |
+|--------|------|-----------|----------|
+| `execute_buy` | Procedure | `(p_user_id, p_ticker, p_quantity, p_price, OUT p_trans_id)` | Validates inputs, calls `upsert_stock()` to create catalogue entry if needed, INSERTs into TRANSACTIONS (firing all three triggers), COMMITs, returns `transaction_id` |
+| `execute_sell` | Procedure | `(p_user_id, p_ticker, p_quantity, p_price, OUT p_trans_id)` | Same flow but stock must already exist; raises `ORA-20012` if not found |
+| `upsert_stock` | Function | `(p_ticker, p_company_name, p_sector?, p_exchange?) RETURN stock_id` | `SELECT stock_id ... EXCEPTION WHEN NO_DATA_FOUND THEN INSERT ... RETURNING stock_id` — idempotent stock registration |
+
+> **Transaction boundary** — Each procedure wraps its logic in `COMMIT` / `ROLLBACK`. This means the PL/SQL layer controls the transaction, not the Python layer — the triggers fire and commit atomically as a single unit of work.
+
+#### Package: `pkg_portfolio`
+
+| Member | Type | Signature | Behavior |
+|--------|------|-----------|----------|
+| `get_portfolio_value` | Function | `(p_user_id) RETURN NUMBER` | Returns the user's cash balance from the USERS table; holdings value is computed by the Python layer using live prices |
+| `save_snapshot` | Procedure | `(p_user_id, p_holdings_val)` | Queries user's balance, INSERTs a snapshot row with `total_value = cash + holdings_val` |
+| `get_holding_pl` | Function | `(p_user_id, p_stock_id, p_cur_price) RETURN NUMBER` | Returns `(current_price − avg_buy_price) × quantity` for a single holding |
+
+#### Standalone Function: `fn_user_total_invested`
+```sql
+-- Returns total cost basis of all open positions
+SELECT NVL(SUM(quantity * avg_buy_price), 0) FROM holdings WHERE user_id = p_user_id
+```
+
+---
+
+### Views
+
+| View | Joins | Purpose | Query |
+|------|-------|---------|-------|
+| `vw_user_holdings_detail` | `HOLDINGS ⟕ STOCKS` | Portfolio page — joins stock metadata (ticker, company_name, sector) with position data (quantity, avg_buy_price, cost_basis) | Filters `quantity > 0` to exclude closed positions |
+| `vw_transaction_history` | `TRANSACTIONS ⟕ STOCKS` | Order history page — enriches each trade with ticker and company name | Ordered by `transaction_time DESC` |
+
+> These views encapsulate common joins so the Python layer can query them with a simple `SELECT *` instead of writing repetitive SQL.
+
+---
+
+### Oracle Connection Pooling
+
+```python
+# db/connection.py — Module-level pool
+_pool = oracledb.create_pool(
+    user=Config.ORACLE_USER,
+    password=Config.ORACLE_PASSWORD,
+    dsn=Config.ORACLE_DSN,
+    min=2, max=10, increment=1,
+)
+```
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `min` | 2 | Always keep 2 warm connections — covers the two background threads (scheduler + price_refresh) |
+| `max` | 10 | Ceiling for concurrent API requests; Oracle XE allows ~40 sessions so 10 leaves room for SQL Developer/Admin |
+| `increment` | 1 | Grow pool one connection at a time to avoid thundering herd on startup |
+
+The **`DBCursor` context manager** wraps the acquire → execute → commit/rollback → release cycle:
+
+```python
+class DBCursor:
+    def __init__(self, auto_commit=False): ...
+    def __enter__(self) -> oracledb.Cursor:
+        self._conn = get_connection()      # Acquire from pool
+        self._cursor = self._conn.cursor()
+        return self._cursor
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if no_error and auto_commit:  self._conn.commit()
+        elif error:                   self._conn.rollback()
+        self._cursor.close()
+        self._conn.close()  # Returns to pool (not a real close)
+```
+
+> **Why thin mode?** — `python-oracledb` in thin mode requires zero native libraries, making the Docker image smaller and build faster. Thick mode (Oracle Instant Client) is optional and only needed for features like Advanced Queuing.
+
+---
+
+### DB-Backed Price Cache
+
+A dedicated `STOCK_PRICE_CACHE` table persists price data so the in-memory cache can be warmed from DB on restart:
+
+```sql
+CREATE TABLE stock_price_cache (
+    ticker          VARCHAR2(20) NOT NULL PRIMARY KEY,
+    price           NUMBER(18,4),
+    change_pct      NUMBER(10,4),
+    open_price      NUMBER(18,4),
+    day_high        NUMBER(18,4),
+    day_low         NUMBER(18,4),
+    previous_close  NUMBER(18,4),
+    volume          NUMBER(20),
+    market_cap      NUMBER(24),
+    fetched_at      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
+);
+```
+
+**Write strategy:** Uses Oracle `MERGE` (upsert) — `WHEN NOT MATCHED THEN INSERT ... WHEN MATCHED THEN UPDATE` — so the first write for a ticker creates the row, and subsequent writes update it in-place.
+
+**Read strategy:** On startup, rows with `fetched_at > SYSTIMESTAMP - INTERVAL '1' HOUR` are loaded into the in-memory cache, avoiding cold-start latency.
+
+---
+
+### Migration Strategy
+
+Migrations use a pattern compatible with Oracle's PL/SQL exception handling:
+
+```sql
+BEGIN
+    EXECUTE IMMEDIATE 'CREATE TABLE notes (...)';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE = -955 THEN NULL; END IF;  -- ORA-00955: table already exists
+END;
+/
+```
+
+| Error Code | Meaning | Action |
+|-----------|---------|--------|
+| `ORA-00955` | Table/index already exists | Silently skip (idempotent) |
+| `ORA-01430` | Column already exists (ALTER TABLE ADD) | Silently skip |
+| `ORA-02443` | Constraint doesn't exist (DROP CONSTRAINT) | Silently skip |
+
+This pattern allows every migration to run safely on every startup — no migration tracking table is needed. The numbering (`001_` through `005_`) is for human readability and execution ordering.
 
 ---
 
@@ -376,7 +848,7 @@ Authorization: Bearer <jwt_token>
 | Route | Page | Description |
 |-------|------|-------------|
 | `/login` | Login | Username + password sign-in |
-| `/register` | Register | New account with $1,000,000 starting balance |
+| `/register` | Register | New account with ₹1,00,00,000 starting balance |
 | `/dashboard` | Dashboard | Portfolio stats, growth chart, holdings table |
 | `/stocks/:ticker` | Stock Detail | Live quote, key stats, interactive chart, trade button |
 | `/watchlist` | Watchlist | Add/remove stocks; organise into folders; quick trade |
@@ -404,7 +876,7 @@ Authorization: Bearer <jwt_token>
 ## Background Services
 
 | Service | Class / Function | Interval | What it does |
-|---------|-----------------|----------|--------------|
+|---------|-----------------|----------|--------------| 
 | Price Scheduler | `PriceScheduler` | 15 s | Fetches prices for active holdings + watchlist + alert tickers; checks pending orders; fires alerts; saves periodic portfolio snapshots every ~6 min |
 | Price Refresh Daemon | `start_refresh_daemon` | 300 s | Refreshes the entire stock catalogue; persists prices to DB |
 | FX Rate Service | `fx_service.get_rates()` | Daily | Fetches live forex rates from yfinance; used by the region/currency context |
@@ -426,7 +898,7 @@ Supported regions/currencies:
 | Japan | JPY | ¥ |
 | Hong Kong | HKD | HK$ |
 
-> **Note:** Cash balance is stored in INR by default (based on `STARTING_BALANCE = 1,000,000`). The region context converts it to the selected display currency using live daily FX rates.
+> **Note:** Cash balance is stored in INR by default (based on `STARTING_BALANCE = 1,00,00,000`). The region context converts it to the selected display currency using live daily FX rates.
 
 ---
 
@@ -454,7 +926,7 @@ When using Docker Compose, `ORACLE_DSN` is automatically overridden to `db:1521/
 
 ### Backend
 
-1. **`STARTING_BALANCE` mismatch** — `config.py` sets `STARTING_BALANCE = 1_000_000.00` but the README previously advertised $100,000. Ensure `04_sample_data.sql` and any seed `INSERT` statements use the same value, otherwise new accounts created via the UI and seeded demo accounts will have different balances.
+1. **`STARTING_BALANCE` mismatch** — `config.py` sets `STARTING_BALANCE = 1_000_000.00` but the auth_service.py INSERT uses `10000000.00`. Ensure `04_sample_data.sql` and any seed `INSERT` statements use the same value, otherwise new accounts created via the UI and seeded demo accounts will have different balances.
 
 2. **`alert_service.mark_read` SQL injection risk (low severity)** — The placeholders string is built via f-string with `len(notif_ids)`. Since the count, not the values, drives the f-string this is safe in practice, but the pattern is fragile. Prefer a fixed `IN (SELECT column_value FROM TABLE(:1))` binding.
 
@@ -495,4 +967,4 @@ When using Docker Compose, `ORACLE_DSN` is automatically overridden to `db:1521/
 
 ## License
 
-This project is for educational purposes as part of a **Database Systems Lab** demonstrating Oracle normalization, PL/SQL triggers, stored procedures, and real-time analytics.
+This project is for educational purposes as part of a **Database Systems Lab (CSS 2212)** demonstrating Oracle normalization, PL/SQL triggers, stored procedures, and real-time analytics.
