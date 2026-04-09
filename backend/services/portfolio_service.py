@@ -133,9 +133,9 @@ class PortfolioService:
                     """SELECT snapshot_date, total_value, cash_balance, holdings_value
                          FROM portfolio_snapshots
                         WHERE user_id = :1
-                          AND snapshot_date >= SYSTIMESTAMP - INTERVAL ':days' DAY
-                        ORDER BY snapshot_date ASC""".replace(":days", str(days)),
-                    [user_id],
+                          AND snapshot_date >= SYSTIMESTAMP - NUMTODSINTERVAL(:2, 'DAY')
+                        ORDER BY snapshot_date ASC""",
+                    [user_id, days],
                 )
                 rows = cur.fetchall()
 
@@ -154,8 +154,20 @@ class PortfolioService:
             logger.error("get_snapshots(user=%s) failed: %s", user_id, e)
             return {"error": str(e)}, 500
 
-    def save_snapshot_after_trade(self, user_id: int) -> None:
-        """Called after every trade to persist a portfolio snapshot."""
+    def save_snapshot_after_trade(
+        self, user_id: int, ticker: str = None, fill_price: float = None
+    ) -> None:
+        """Called after every trade to persist a portfolio snapshot.
+
+        Pass *ticker* and *fill_price* to seed the price cache with the known
+        trade price so the snapshot reflects the correct holdings value even
+        before the background scheduler has had a chance to refresh prices.
+        """
+        if ticker and fill_price:
+            from services.cache import price_cache
+            existing = price_cache.get(ticker) or {}
+            if not existing.get("price"):
+                price_cache.set_price(ticker.upper(), {"price": fill_price, "change_pct": 0.0})
         result, status = self.get_portfolio(user_id)
         if status != 200:
             return

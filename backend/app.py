@@ -88,6 +88,7 @@ def create_app() -> Flask:
         "002_watchlist_folders.sql",
         "003_pending_orders.sql",
         "004_alerts.sql",
+        "005_watchlist_multi_folder.sql",
     ]:
         run_migration(migration)
 

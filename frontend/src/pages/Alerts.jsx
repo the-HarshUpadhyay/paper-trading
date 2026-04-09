@@ -53,6 +53,15 @@ export default function Alerts() {
   useEffect(() => { fetchAlerts() }, [fetchAlerts])
   useEffect(() => { fetchNotifs() }, [fetchNotifs])
 
+  // Poll every 15 s so triggered alerts and new notifications appear automatically
+  useEffect(() => {
+    const id = setInterval(() => {
+      fetchAlerts()
+      fetchNotifs()
+    }, 15_000)
+    return () => clearInterval(id)
+  }, [fetchAlerts, fetchNotifs])
+
   const handleCreate = async (e) => {
     e.preventDefault()
     setCreateError(null)

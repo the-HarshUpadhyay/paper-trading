@@ -22,13 +22,19 @@ def get_watchlist():
 @watchlist_bp.route("/watchlist", methods=["POST"])
 @jwt_required()
 def add_to_watchlist():
-    user_id = get_uid()
-    data    = request.get_json(silent=True) or {}
-    ticker  = (data.get("ticker") or "").strip().upper()
+    user_id   = get_uid()
+    data      = request.get_json(silent=True) or {}
+    ticker    = (data.get("ticker") or "").strip().upper()
+    folder_id = data.get("folder_id")
     if not ticker:
         return jsonify({"error": "ticker is required"}), 400
+    if folder_id is not None:
+        try:
+            folder_id = int(folder_id)
+        except (ValueError, TypeError):
+            return jsonify({"error": "folder_id must be an integer"}), 400
 
-    result, status = _svc.add(user_id, ticker)
+    result, status = _svc.add(user_id, ticker, folder_id)
     return jsonify(result), status
 
 
@@ -70,6 +76,14 @@ def rename_folder(folder_id: int):
 def delete_folder(folder_id: int):
     user_id = get_uid()
     result, status = _svc.delete_folder(user_id, folder_id)
+    return jsonify(result), status
+
+
+@watchlist_bp.route("/watchlist/item/<int:watchlist_id>", methods=["DELETE"])
+@jwt_required()
+def remove_item(watchlist_id: int):
+    user_id = get_uid()
+    result, status = _svc.remove_by_id(user_id, watchlist_id)
     return jsonify(result), status
 
 

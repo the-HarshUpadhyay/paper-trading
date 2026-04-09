@@ -3,6 +3,8 @@ services:
   # ── Oracle XE 21c ────────────────────────────────────────────────────────────
   db:
     image: gvenzl/oracle-xe:21-slim
+    restart: unless-stopped
+    shm_size: 1g
     environment:
       ORACLE_PASSWORD: oracle          # sets SYS + SYSTEM password
       APP_USER: trader
@@ -19,10 +21,17 @@ services:
       timeout: 10s
       retries: 15
       start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+        reservations:
+          memory: 2g
 
   # ── Flask backend ─────────────────────────────────────────────────────────────
   backend:
     build: ./backend
+    restart: unless-stopped
     ports:
       - "5000:5000"
     env_file:
@@ -36,10 +45,17 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app    # hot-reload: file changes reflect immediately
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 256m
 
   # ── Vite dev server ───────────────────────────────────────────────────────────
   frontend:
     build: ./frontend
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
@@ -49,6 +65,12 @@ services:
     volumes:
       - ./frontend/src:/app/src          # hot-reload
       - ./frontend/public:/app/public
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 256m
 
 volumes:
   oracle_data:

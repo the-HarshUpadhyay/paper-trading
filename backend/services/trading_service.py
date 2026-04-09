@@ -24,9 +24,9 @@ class TradingService:
             trans_id = scalar_out(trans_id_var)
             conn.commit()
 
-            # Async snapshot save (best-effort)
+            # Async snapshot save (best-effort) — pass price so cache is warm
             try:
-                PortfolioService().save_snapshot_after_trade(user_id)
+                PortfolioService().save_snapshot_after_trade(user_id, ticker=ticker, fill_price=price)
             except Exception:
                 pass
 
@@ -68,7 +68,7 @@ class TradingService:
             conn.commit()
 
             try:
-                PortfolioService().save_snapshot_after_trade(user_id)
+                PortfolioService().save_snapshot_after_trade(user_id, ticker=ticker, fill_price=price)
             except Exception:
                 pass
 

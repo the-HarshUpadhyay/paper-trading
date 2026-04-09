@@ -47,6 +47,7 @@ class PriceScheduler:
         self._thread: threading.Thread | None = None
         self._active_tickers: list[str] = []
         self._last_ticker_refresh: float = 0.0
+        self._snapshot_tick: int = 0
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -85,14 +86,18 @@ class PriceScheduler:
         try:
             with DBCursor() as cur:
                 cur.execute(
-                    """SELECT DISTINCT s.ticker
-                         FROM stocks s
-                        WHERE s.stock_id IN (
-                              SELECT stock_id FROM holdings  WHERE quantity > 0
-                              UNION
-                              SELECT stock_id FROM watchlist
-                        )
-                        ORDER BY s.ticker"""
+                    """SELECT DISTINCT ticker FROM (
+                           SELECT s.ticker
+                             FROM stocks s
+                            WHERE s.stock_id IN (
+                                  SELECT stock_id FROM holdings  WHERE quantity > 0
+                                  UNION
+                                  SELECT stock_id FROM watchlist
+                            )
+                           UNION
+                           SELECT ticker FROM price_alerts WHERE is_active = 1
+                       )
+                       ORDER BY ticker"""
                 )
                 rows = cur.fetchall()
             tickers = [row[0] for row in rows]
@@ -140,6 +145,31 @@ class PriceScheduler:
                     check_alerts(ticker, cached["price"])
         except Exception as e:
             logger.error("Scheduler check_alerts error: %s", e)
+
+        # Every 24 ticks (~6 minutes) save portfolio snapshots for active users
+        self._snapshot_tick += 1
+        if self._snapshot_tick >= 24:
+            self._snapshot_tick = 0
+            self._save_periodic_snapshots()
+
+    def _save_periodic_snapshots(self) -> None:
+        """Save portfolio snapshots for all users who currently hold positions."""
+        try:
+            from db.connection import DBCursor
+            from services.portfolio_service import PortfolioService
+            svc = PortfolioService()
+            with DBCursor() as cur:
+                cur.execute(
+                    "SELECT DISTINCT user_id FROM holdings WHERE quantity > 0"
+                )
+                user_ids = [r[0] for r in cur.fetchall()]
+            for uid in user_ids:
+                try:
+                    svc.save_snapshot_after_trade(uid)
+                except Exception as e:
+                    logger.warning("periodic snapshot(user=%s): %s", uid, e)
+        except Exception as e:
+            logger.warning("_save_periodic_snapshots error: %s", e)
 
     def _run_loop(self) -> None:
         """Main loop — runs until stop() sets the event."""

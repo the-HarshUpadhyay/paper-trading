@@ -144,23 +144,30 @@ def check_and_fill(ticker: str, current_price: float) -> None:
             fill_price = current_price
 
             if otype == "LIMIT":
+                if limit_p is None:
+                    continue   # malformed — skip
                 if side == "BUY"  and current_price <= limit_p:
                     triggered  = True
                     fill_price = limit_p
                 elif side == "SELL" and current_price >= limit_p:
                     triggered  = True
                     fill_price = limit_p
-            elif otype == "STOP":
+            elif otype == "STOP":              # SL-M: trigger → market fill
+                if stop_p is None:
+                    continue
                 if side == "SELL" and current_price <= stop_p:
+                    triggered = True           # fill_price stays current_price
+                elif side == "BUY"  and current_price >= stop_p:
                     triggered = True
-            elif otype == "STOP_LIMIT":
-                if stop_p and limit_p:
-                    if side == "SELL" and current_price <= stop_p:
-                        triggered  = True
-                        fill_price = limit_p
-                    elif side == "BUY" and current_price >= stop_p:
-                        triggered  = True
-                        fill_price = limit_p
+            elif otype == "STOP_LIMIT":        # SL: trigger → limit fill
+                if stop_p is None or limit_p is None:
+                    continue
+                if side == "SELL" and current_price <= stop_p:
+                    triggered  = True
+                    fill_price = limit_p
+                elif side == "BUY" and current_price >= stop_p:
+                    triggered  = True
+                    fill_price = limit_p
 
             if not triggered:
                 continue
@@ -181,6 +188,8 @@ def check_and_fill(ticker: str, current_price: float) -> None:
                                 WHERE order_id = :2""",
                             [fill_price, order_id],
                         )
+                    # save_snapshot_after_trade is already called inside svc.buy/sell,
+                    # with the fill_price passed through so the cache is warm.
                 else:
                     logger.warning(
                         "check_and_fill: trade failed for order %s: %s", order_id, result

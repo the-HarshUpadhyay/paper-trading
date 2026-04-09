@@ -90,9 +90,9 @@ class WatchlistService:
             logger.error("get_watchlist(user=%s) failed: %s", user_id, e)
             return {"error": str(e)}, 500
 
-    def add(self, user_id: int, ticker: str):
+    def add(self, user_id: int, ticker: str, folder_id: int | None = None):
         """
-        Add *ticker* to the user's watchlist.
+        Add *ticker* to the user's watchlist, optionally into a specific folder.
 
         If the stock is not yet in the DB catalogue, fetch its name/sector
         from yfinance and insert it.  yfinance is only called here because
@@ -138,18 +138,33 @@ class WatchlistService:
                     )
                     stock_id = scalar_out(out_var)
 
-                # Insert into watchlist
+                # Insert into watchlist with optional folder assignment
                 cur.execute(
-                    "INSERT INTO watchlist (user_id, stock_id) VALUES (:1, :2)",
-                    [user_id, stock_id],
+                    "INSERT INTO watchlist (user_id, stock_id, folder_id) VALUES (:1, :2, :3)",
+                    [user_id, stock_id, folder_id],
                 )
 
             return {"message": f"{ticker} added to watchlist"}, 201
 
         except oracledb.IntegrityError:
-            return {"error": f"{ticker} is already in your watchlist"}, 409
+            return {"error": f"{ticker} is already in this list"}, 409
         except Exception as e:
             logger.error("watchlist.add(user=%s, ticker=%s) failed: %s", user_id, ticker, e)
+            return {"error": str(e)}, 500
+
+    def remove_by_id(self, user_id: int, watchlist_id: int):
+        """Remove a specific watchlist entry by its ID (single-list removal)."""
+        try:
+            with DBCursor(auto_commit=True) as cur:
+                cur.execute(
+                    "DELETE FROM watchlist WHERE watchlist_id = :1 AND user_id = :2",
+                    [watchlist_id, user_id],
+                )
+                if cur.rowcount == 0:
+                    return {"error": "Item not found"}, 404
+            return {"message": "Removed"}, 200
+        except Exception as e:
+            logger.error("watchlist.remove_by_id(user=%s, id=%s) failed: %s", user_id, watchlist_id, e)
             return {"error": str(e)}, 500
 
     def remove(self, user_id: int, ticker: str):

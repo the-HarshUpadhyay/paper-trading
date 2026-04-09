@@ -19,9 +19,9 @@ A production-quality paper trading platform built with **Oracle 21c XE**, **Pyth
 - **Notifications** — In-app notification feed; unread count badge in the header; mark-as-read support
 - **Trading Notes** — Create, edit, and delete personal notes optionally linked to a specific ticker
 - **Analytics Dashboard** — Portfolio growth chart (7D/1M/3M/6M/1Y), sector allocation pie, cash vs. holdings donut, P/L bar chart per holding, top/bottom performer cards
-- **Watchlist Folders** — Organise watchlist items into named folders; rename and delete folders; drag items between folders
+- **Watchlist Folders** — Organise watchlist items into named folders; same ticker can appear in multiple lists; "All" tab shows every watched stock across all lists; add directly to a folder from the add form
 - **Multi-Currency / Region Support** — Display all prices and P&L in USD, INR, GBP, EUR, JPY, or HKD; live FX rates fetched daily from Yahoo Finance with hardcoded fallbacks
-- **Background Price Scheduler** — Daemon thread (`PriceScheduler`) refreshes active portfolio/watchlist prices every **15 seconds**; checks pending orders and alerts on each tick
+- **Background Price Scheduler** — Daemon thread (`PriceScheduler`) refreshes active portfolio/watchlist/alert prices every **15 seconds**; checks pending orders and alerts on each tick; saves periodic portfolio snapshots every ~6 minutes
 - **Full-Catalogue Price Refresh** — Secondary daemon (`price_refresh`) keeps the entire stock catalogue fresh every **300 seconds** and persists prices to the DB
 - **Thread-Safe In-Memory Cache** — `PriceCache` with separate TTLs (30 s price, 60 s full quote); deduplication prevents parallel fetches for the same ticker
 - **Health Check Endpoint** — `GET /api/health` returns service status and cache size
@@ -160,9 +160,11 @@ PORTFOLIO_SNAPSHOTS — Periodic portfolio valuations for growth chart
 ```
 NOTES               — User trading journal entries, optionally linked to a ticker
 WATCHLIST_FOLDERS   — Named folders for organising watchlist items
+PENDING_ORDERS      — Limit / Stop / Stop-Limit orders awaiting execution
 PRICE_ALERTS        — Price threshold alerts (ABOVE / BELOW) per user/ticker
 NOTIFICATIONS       — In-app notifications generated when an alert triggers
-PENDING_ORDERS      — Limit / Stop / Stop-Limit orders awaiting execution
+005 (index)         — Replaces UNIQUE(user_id, stock_id) with UNIQUE(user_id, stock_id, NVL(folder_id,-1))
+                      allowing the same ticker in multiple watchlist folders
 ```
 
 ### PL/SQL Objects
@@ -205,7 +207,7 @@ docker compose up
 | Backend API | http://localhost:5000 |
 | Oracle | localhost:1521 (XEPDB1) |
 
-The SQL init scripts (`01_schema.sql` → `04_sample_data.sql`) run automatically on first boot. Migration scripts (`001_notes.sql` → `004_alerts.sql`) are applied automatically every time the backend starts — they are idempotent and safe to re-run. Database state persists in a named Docker volume (`oracle_data`) between restarts.
+The SQL init scripts (`01_schema.sql` → `04_sample_data.sql`) run automatically on first boot. Migration scripts (`001_notes.sql` → `005_watchlist_multi_folder.sql`) are applied automatically every time the backend starts — they are idempotent and safe to re-run. Database state persists in a named Docker volume (`oracle_data`) between restarts.
 
 **Useful commands:**
 
@@ -335,9 +337,10 @@ Authorization: Bearer <jwt_token>
 ### Watchlist
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET    | `/api/watchlist` | Get all watchlist items with live prices |
-| POST   | `/api/watchlist` | Add a ticker `{ticker}` |
-| DELETE | `/api/watchlist/<ticker>` | Remove a ticker |
+| GET    | `/api/watchlist` | Get all watchlist items with live prices + all folders |
+| POST   | `/api/watchlist` | Add a ticker `{ticker, folder_id?}` — same ticker allowed in multiple folders |
+| DELETE | `/api/watchlist/<ticker>` | Remove all entries for a ticker (full unwatch) |
+| DELETE | `/api/watchlist/item/<watchlist_id>` | Remove a single list entry by ID |
 | POST   | `/api/watchlist/folders` | Create a folder `{name}` |
 | PATCH  | `/api/watchlist/folders/<folder_id>` | Rename a folder `{name}` |
 | DELETE | `/api/watchlist/folders/<folder_id>` | Delete a folder |
@@ -391,9 +394,9 @@ Authorization: Bearer <jwt_token>
 2. **Insufficient funds** — Same trigger raises `ORA-20002` if cash balance is too low
 3. **Immutable ledger** — The `TRANSACTIONS` table is never updated or deleted; holdings are derived from it
 4. **VWAP cost basis** — `trg_update_holdings` recalculates average buy price as a volume-weighted average on each new purchase
-5. **Portfolio snapshots** — Saved automatically after every trade for the growth chart
-6. **Pending order auto-fill** — Every scheduler tick (~15 s), `check_and_fill_all` evaluates all OPEN pending orders against the current cached price and executes the trade when triggered
-7. **Alert one-shot** — Once a price alert fires it is marked `is_active = 0`; a notification row is inserted and the user's unread count increments
+5. **Portfolio snapshots** — Saved after every trade and periodically every ~6 minutes by the scheduler for the growth chart; uses `NUMTODSINTERVAL` for correct date arithmetic on multi-day ranges
+6. **Pending order auto-fill** — Every scheduler tick (~15 s), `check_and_fill_all` evaluates all OPEN pending orders against the current cached price and executes the trade when triggered; BUY SL-M triggers when price rises to/above stop; SELL SL-M triggers when price falls to/below stop
+7. **Alert one-shot** — Once a price alert fires it is marked `is_active = 0`; a notification row is inserted and the user's unread count increments; alert tickers are included in the scheduler's active ticker list even if not held or watched
 8. **Idempotent migrations** — Migration scripts use `CREATE TABLE … IF NOT EXISTS` equivalent patterns so they can be safely re-applied on restart
 
 ---
@@ -402,7 +405,7 @@ Authorization: Bearer <jwt_token>
 
 | Service | Class / Function | Interval | What it does |
 |---------|-----------------|----------|--------------|
-| Price Scheduler | `PriceScheduler` | 15 s | Fetches prices for active holdings + watchlist tickers; checks pending orders; fires alerts |
+| Price Scheduler | `PriceScheduler` | 15 s | Fetches prices for active holdings + watchlist + alert tickers; checks pending orders; fires alerts; saves periodic portfolio snapshots every ~6 min |
 | Price Refresh Daemon | `start_refresh_daemon` | 300 s | Refreshes the entire stock catalogue; persists prices to DB |
 | FX Rate Service | `fx_service.get_rates()` | Daily | Fetches live forex rates from yfinance; used by the region/currency context |
 
@@ -455,9 +458,7 @@ When using Docker Compose, `ORACLE_DSN` is automatically overridden to `db:1521/
 
 2. **`alert_service.mark_read` SQL injection risk (low severity)** — The placeholders string is built via f-string with `len(notif_ids)`. Since the count, not the values, drives the f-string this is safe in practice, but the pattern is fragile. Prefer a fixed `IN (SELECT column_value FROM TABLE(:1))` binding.
 
-3. **Pending order `STOP_LIMIT` BUY logic** — In `pending_order_service.py`, a `STOP_LIMIT BUY` triggers when `current_price >= stop_p`, which is atypical (a buy stop-limit usually triggers above the stop and fills at the limit). Verify this matches the intended trading semantics.
-
-4. **`price_cache` singleton shared between Flask workers** — If the backend is later scaled with multiple processes (e.g. gunicorn `--workers N`), each worker will have its own in-memory cache, leading to stale/inconsistent prices across workers. For multi-process deployments, migrate the cache to Redis.
+3. **`price_cache` singleton shared between Flask workers** — If the backend is later scaled with multiple processes (e.g. gunicorn `--workers N`), each worker will have its own in-memory cache, leading to stale/inconsistent prices across workers. For multi-process deployments, migrate the cache to Redis.
 
 ### Frontend
 

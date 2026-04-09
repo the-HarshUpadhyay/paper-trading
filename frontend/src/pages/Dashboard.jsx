@@ -106,8 +106,9 @@ export default function Dashboard() {
     try {
       const { data } = await portfolioAPI.snapshots(730)
       setSnapshots(data.snapshots || [])
-    } catch (_) {}
-    finally { setSnapLoading(false) }
+    } catch (e) {
+      setError(e.response?.data?.error || 'Failed to load portfolio history')
+    } finally { setSnapLoading(false) }
   }, [])
 
   useEffect(() => {

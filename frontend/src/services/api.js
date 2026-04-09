@@ -75,8 +75,9 @@ export const portfolioAPI = {
 // ── Watchlist ────────────────────────────────────────────────────────────────
 export const watchlistAPI = {
   get: () => api.get('/watchlist'),
-  add: (ticker) => api.post('/watchlist', { ticker }),
-  remove: (ticker) => api.delete(`/watchlist/${ticker}`),
+  add: (ticker, folder_id = null) => api.post('/watchlist', { ticker, folder_id }),
+  remove: (ticker) => api.delete(`/watchlist/${ticker}`),       // full unwatch (all lists)
+  removeItem: (watchlist_id) => api.delete(`/watchlist/item/${watchlist_id}`),  // single-list
   createFolder: (name) => api.post('/watchlist/folders', { name }),
   renameFolder: (id, name) => api.patch(`/watchlist/folders/${id}`, { name }),
   deleteFolder: (id) => api.delete(`/watchlist/folders/${id}`),

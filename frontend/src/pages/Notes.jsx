@@ -3,6 +3,7 @@ import {
   FileText, Plus, Trash2, Save, Tag, X, Loader2,
 } from 'lucide-react'
 import Header from '../components/Header'
+import TickerInput from '../components/TickerInput'
 import { notesAPI } from '../services/api'
 
 export default function Notes() {
@@ -200,14 +201,21 @@ export default function Notes() {
               {/* Optional ticker tag */}
               <div className="note-ticker-row">
                 <Tag size={13} style={{ color: 'var(--text-muted)' }} />
-                <input
-                  className="note-ticker-input"
-                  placeholder="Link to ticker (optional)"
-                  value={ticker}
-                  onChange={(e) => setTicker(e.target.value.toUpperCase())}
-                  maxLength={10}
-                  disabled={!isNew}   // ticker can only be set on create
-                />
+                {isNew ? (
+                  <TickerInput
+                    value={ticker}
+                    onChange={setTicker}
+                    onSelect={setTicker}
+                    placeholder="Link to ticker (optional)"
+                    className="note-ticker-input-wrap"
+                  />
+                ) : (
+                  <input
+                    className="note-ticker-input"
+                    value={ticker}
+                    disabled
+                  />
+                )}
               </div>
 
               <textarea

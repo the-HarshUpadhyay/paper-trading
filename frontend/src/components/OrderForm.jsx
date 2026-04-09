@@ -66,6 +66,13 @@ export default function OrderForm({ ticker, price, initialSide = 'buy', onClose,
         onSuccess?.(data)
         onClose?.()
       } else {
+        // Validate required prices per order type
+        if ((orderType === 'LIMIT' || isSL) && !limitPrice) {
+          setError('Limit price is required'); setLoading(false); return
+        }
+        if (triggerEnabled && !stopPrice) {
+          setError('Trigger price is required'); setLoading(false); return
+        }
         const payload = {
           ticker:     ticker.toUpperCase(),
           side:       side.toUpperCase(),

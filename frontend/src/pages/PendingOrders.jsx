@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Clock, Ban, CheckCircle, Plus, Loader2, X } from 'lucide-react'
 import Header from '../components/Header'
 import OrderForm from '../components/OrderForm'
+import TickerInput from '../components/TickerInput'
 import { pendingOrdersAPI, stocksAPI } from '../services/api'
 import { useRegion, tickerCurrency } from '../context/RegionContext'
 
@@ -15,13 +16,11 @@ const STATUS_ICON = {
 
 /** Small first-step modal: just pick a ticker, then open the full OrderForm */
 function TickerPicker({ onConfirm, onClose }) {
-  const [ticker, setTicker]     = useState('')
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState(null)
+  const [ticker, setTicker]   = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState(null)
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    const t = ticker.trim().toUpperCase()
+  const confirm = async (t) => {
     if (!t) return
     setLoading(true)
     setError(null)
@@ -35,6 +34,11 @@ function TickerPicker({ onConfirm, onClose }) {
     }
   }
 
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    confirm(ticker.trim().toUpperCase())
+  }
+
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal-card" style={{ maxWidth: 340 }}>
@@ -45,13 +49,12 @@ function TickerPicker({ onConfirm, onClose }) {
         <form onSubmit={handleSubmit} className="order-body">
           <label className="form-label">
             Ticker Symbol
-            <input
-              className="form-input"
-              placeholder="e.g. AAPL, RELIANCE.NS"
+            <TickerInput
               value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              maxLength={20}
-              autoFocus
+              onChange={setTicker}
+              onSelect={(t) => confirm(t)}
+              placeholder="e.g. AAPL, RELIANCE.NS"
+              disabled={loading}
             />
           </label>
           {error && <p className="form-error">{error}</p>}

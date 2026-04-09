@@ -1313,6 +1313,17 @@ input, select, textarea { font-family: var(--font); }
 .note-ticker-input:focus  { border-color: var(--brand); }
 .note-ticker-input:disabled { opacity: 0.6; cursor: default; }
 
+.note-ticker-input-wrap { flex: 0 0 auto; }
+.note-ticker-input-wrap .form-input {
+  width: 160px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--brand);
+  padding: 3px 8px;
+  background: none;
+  text-transform: uppercase;
+}
+
 .note-body {
   flex: 1;
   min-height: 360px;
