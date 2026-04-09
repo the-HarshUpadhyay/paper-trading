@@ -122,3 +122,79 @@ If the demo user ever needs to be restored manually:
 ```powershell
 docker compose exec -T backend python scripts/seed_demo.py
 ```
+
+
+## Changes Implemented
+
+This update includes a focused cleanup and reliability pass across the backend, database setup, scheduler flow, and project documentation.
+
+### 1. Starting Balance Normalized
+The project now consistently uses a starting balance of:
+
+`10_000_000.00` INR
+
+This has been aligned across:
+- `backend/config.py`
+- `backend/services/auth_service.py`
+- `database/04_sample_data.sql`
+- seed/demo account setup
+- README and related documentation
+
+The app is now documented as an **INR / NSE-first paper trading platform**, and stale USD-based balance references were updated accordingly.
+
+### 2. Safer Notification Mark-As-Read Logic
+`backend/services/alert_service.py` was refactored to remove the fragile dynamic SQL placeholder pattern previously used in `mark_read`.
+
+What changed:
+- replaced dynamic `IN (...)` placeholder construction
+- switched to a fixed SQL statement with bound parameters via `executemany(...)`
+- preserved existing behavior while improving safety and maintainability
+
+### 3. Pending Order Semantics Reviewed and Clarified
+`backend/services/pending_order_service.py` was reviewed for order-trigger behavior.
+
+What changed:
+- `STOP_LIMIT BUY` behavior was validated against standard trading semantics
+- clarifying comments were added to explain:
+  - `LIMIT BUY`
+  - `LIMIT SELL`
+  - `STOP BUY`
+  - `STOP SELL`
+  - `STOP_LIMIT BUY`
+  - `STOP_LIMIT SELL`
+
+Result:
+- the breakout-style `STOP_LIMIT BUY` logic is now explicitly documented and easier to understand
+
+### 4. Price Cache Limitation Documented
+`backend/services/cache.py` now clearly documents that the current `price_cache` is:
+
+- in-memory
+- process-local
+- safe for single-process deployments
+- not suitable for multi-worker production scaling without a shared cache such as Redis
+
+This does not change runtime behavior, but it makes the deployment limitation explicit and provides a clear migration direction for future scaling.
+
+### 5. Faster Scheduler Pickup for New Tickers
+`backend/services/scheduler.py` was improved so newly tracked stocks do not need to wait for the full ticker refresh cycle.
+
+What changed:
+- added `notify_ticker_added(ticker)`
+- allows newly bought stocks or newly added watchlist stocks to be registered immediately
+- reduces the delay before price refresh begins for newly tracked symbols
+
+This keeps the scheduler lightweight while improving responsiveness for watchlist and trading flows.
+
+### Overall Impact
+These changes improve:
+- consistency of financial defaults
+- backend SQL safety
+- clarity of pending-order behavior
+- deployment transparency for caching
+- refresh responsiveness for newly tracked stocks
+
+The update is intentionally conservative and does not introduce unnecessary architectural churn.
+
+
+
